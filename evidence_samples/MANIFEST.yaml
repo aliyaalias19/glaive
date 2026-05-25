@@ -1,0 +1,18 @@
+# GLAIVE Evidence Manifest
+# Populated during Day 7 case selection. Each case lists its source,
+# the SHA-256 of the downloadable archive, and per-artifact hashes.
+
+schema_version: 1
+
+cases:
+  # case1:
+  #   name: "..."
+  #   source_url: "..."
+  #   archive_sha256: "..."
+  #   artifacts:
+  #     - relative_path: memory/host01.mem
+  #       sha256: "..."
+  #       type: memory_image
+  #     - relative_path: logs/Security.evtx
+  #       sha256: "..."
+  #       type: evtx

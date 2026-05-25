@@ -1,0 +1,56 @@
+[project]
+name = "glaive"
+version = "0.1.0"
+description = "Graph-Linked Adversarial Investigation & Verification Engine — extends Protocol SIFT with architectural hallucination resistance."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Aliya Alias" }]
+
+dependencies = [
+    # MCP server (the verification layer)
+    "mcp>=1.2.0",
+    # Graph + typing
+    "networkx>=3.2",
+    "pydantic>=2.7",
+    # Forensic primitives (Python-native; SIFT also provides binaries)
+    "volatility3>=2.7.0",
+    "python-evtx>=0.8.0",
+    "regipy>=4.0.0",
+    "pytsk3>=20231007",
+    # Interface + reporting
+    "rich>=13.7.0",
+    "typer>=0.12.0",
+    # Utilities
+    "pyyaml>=6.0",
+    "orjson>=3.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5.0",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+glaive = "glaive.cli:app"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["glaive*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

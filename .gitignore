@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Secrets — never commit
+.env
+.env.*
+*.key
+config.local.yaml
+
+# SSH/credentials safety net
+.claude/.credentials.json
+**/.credentials.json
+
+# Evidence — large binaries, never commit raw evidence
+evidence_samples/*.raw
+evidence_samples/*.mem
+evidence_samples/*.vmem
+evidence_samples/*.dmp
+evidence_samples/*.E01
+evidence_samples/*.AD1
+evidence_samples/*.evtx
+evidence_samples/*.zip
+evidence_samples/*.tar.gz
+evidence_samples/**/raw/
+
+# Generated outputs
+runs/
+output/
+*.log
+agent_traces/
+
+# But DO keep the README and a manifest describing what evidence to download
+!evidence_samples/README.md
+!evidence_samples/MANIFEST.yaml
