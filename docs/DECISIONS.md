@@ -88,9 +88,11 @@ ground-truth case. Within it, focus on the `rd01` host (Remote Desktop Server 1)
   msedge.exe masquerading, pssdnsvc.exe, atmfd.dll, lateral movement via
   `net use H: \\172.16.6.12\c$\Users`). We can measure precision/recall against it.
 
-**Trade-off accepted:** We deliberately do not demo cross-host correlation
-in the primary submission. If time permits at the end of Week 3, we may add
-dc01 memory as a bonus stretch.
+**Scope refined (see D9):** Primary submission is rd01 depth. In Week 3 we
+add a single cross-host correlation finding using dc01 memory — not a
+multi-host platform, but a demonstration that the graph schema supports
+multi-host without that being the headline feature. Cross-host correlation
+is committed Week 3 scope, not a maybe.
 
 ---
 
@@ -128,5 +130,60 @@ discovered mid-implementation:
   identifier pairs prevent collision.
 
 The "schema fits findings" exercise is the design's primary correctness check.
+
+---
+## D9 — 2026-05-25 — Judging scope: 2 Very Strong + 4 Strong
+
+**Decision:** Build for "2 Very Strong + 4 Strong" coverage of the six
+judging criteria (Section 6 of the rules). Not "6 Very Strong" (unrealistic
+for solo 3-week effort against Valhuntir-scale submissions). Not "2 Strong
++ 4 mixed" (leaves exploitable soft spots).
+
+**Target scorecard:**
+
+| Criterion | Target | What earns it |
+|---|---|---|
+| 1. Autonomous Execution Quality | Strong | Three-tier self-correction (tool failure / graph rejection / self-uncertainty), all logged with timestamps and token usage |
+| 2. IR Accuracy | **Very Strong** | Graph-grounded findings; multi-source `confirmed_by` corroboration; honest accuracy report with precision/recall/hallucination count against SRL ground truth |
+| 3. Breadth and Depth | Strong | rd01 deep coverage (all 3 evidence types, all documented SRL findings) + one cross-host correlation finding from dc01 memory |
+| 4. Constraint Implementation | **Very Strong** | Architectural commit gate (not prompt-based); 5 bypass tests with documented architectural defense reasoning |
+| 5. Audit Trail Quality | Strong | Every finding → graph path → `evidence_hash` → byte offset, demonstrated in <15s of demo |
+| 6. Usability and Documentation | Strong | One-command install + 3-minute fresh-install video; `docs/EXTENDING.md`; architecture poster (PNG); CI passing in public repo |
+
+**Why this scorecard and not "6 Very Strong":**
+
+Hackathon scoring is comparative. "Very Strong" means meaningfully better
+than the field on that criterion. Two criteria are structurally hard to
+dominate as a solo 3-week effort:
+
+- **Breadth & Depth** — Valhuntir-style platforms cover broad surface area
+  by virtue of being multi-month team projects with many tool integrations.
+  Trying to match breadth costs us depth on bypass tests. The rule explicitly
+  says *"depth on fewer types beats shallow coverage of many"* — we trust
+  that rule and play to depth instead.
+- **Usability & Documentation** — Web portals with polished UIs are
+  expensive in time. Our SIFT-native terminal interface is appropriate to
+  the target environment; we earn "Strong" on usability by being deployable
+  and well-documented, not by being shiny.
+
+The two **Very Strong** criteria — IR Accuracy and Constraint Implementation
+— map directly to the hackathon's *stated* theme:
+*"Protocol SIFT works. It also hallucinates more than we'd like. That's
+exactly why this hackathon exists."* — Rob T. Lee, SANS Chief AI Officer.
+
+We win on the theme, hold on the rest, and accept that no solo project
+can outshine multi-month platforms on every axis.
+
+**What this commits us to in calendar time:**
+
+| Week 3 day | Task |
+|---|---|
+| Day 17 | Cross-host correlation: download dc01 memory, parse, populate Host node |
+| Day 17-18 | EXTENDING.md and CI workflow setup |
+| Day 19 | 3-minute fresh-install video + architecture poster PNG |
+| Day 20 | Main 5-minute demo video |
+
+If any of these slip, the cuts come from the Strong upgrades (not from the
+Very Strong baseline).
 
 ---
