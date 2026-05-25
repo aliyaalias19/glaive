@@ -187,3 +187,47 @@ If any of these slip, the cuts come from the Strong upgrades (not from the
 Very Strong baseline).
 
 ---
+## D10 — 2026-05-25 — Anomalies are query-side; query catalog is v1 scope
+
+**Decision:** Anomaly detection (e.g., "process is masquerading," "service
+name doesn't match its image path") lives in *queries*, not in stored
+node properties. A small **query catalog** under `glaive/queries/` is v1
+scope.
+
+**Why:**
+
+While walking through the SRL findings → schema mapping (Section 6 of
+`docs/EVIDENCE_GRAPH_SCHEMA.md`), two originally-planned stored properties
+were identified as judgments rather than observations:
+
+- `Process.image_path_is_anomalous` — answers "is this masquerading?"
+- `Service.name_path_mismatch` — answers "does the service name match its binary?"
+
+Both encode *interpretation*, not *evidence*. The schema's job is to store
+what tools observed; interpretation belongs in a separate layer that can
+evolve without schema changes.
+
+**Practical effect:**
+
+- Drop both fields from the schema (already reflected in v1 doc).
+- Add `glaive/queries/` — a module of named, parameterized queries the
+  agent can invoke by name (e.g., `find_masquerading_processes(host)`).
+- The query catalog itself is small (~10-15 queries), each ~10-30 lines
+  of NetworkX traversal. Estimated build cost: ~6-8 hours in Week 2.
+
+**Why include in v1, not defer:**
+
+Without a query catalog, the agent must construct anomaly checks from
+scratch every run. That's:
+- Slower (LLM reconstructs the same logic repeatedly)
+- Inconsistent (different runs may apply different criteria for "masquerading")
+- Harder to audit (no canonical definition of each anomaly type)
+
+The catalog makes anomalies *named, versioned, and testable* — directly
+supporting our Audit Trail (Criterion 5) and IR Accuracy (Criterion 2)
+positions.
+
+**Trade-off accepted:** Slightly more Week 2 work for a meaningfully
+stronger demonstration of architectural reasoning quality.
+
+---
