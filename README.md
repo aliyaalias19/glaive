@@ -76,14 +76,21 @@ cd glaive
 ./install.sh
 export ANTHROPIC_API_KEY="sk-ant-..."
 
-# Run against the bundled Case 1 evidence
-glaive investigate evidence_samples/case1/ --output runs/case1/
+# Set up the case directory (matches Protocol SIFT convention)
+export CASE=/cases/srl
+mkdir -p ${CASE}/{analysis,exports,reports}
+# Download evidence into ${CASE}/ (see evidence_samples/README.md)
+
+# Run GLAIVE inside the case directory
+cd ${CASE}
+glaive investigate .
 ```
 
-Open `runs/case1/report.md` for the narrative; `runs/case1/report.json` for the
-machine-readable findings with full provenance.
+Outputs land in `${CASE}/analysis/`, `${CASE}/exports/`, and `${CASE}/reports/`
+— matching Protocol SIFT's documented output convention.
 
----
+Open `reports/findings.md` for the narrative; `reports/findings.json` for the
+machine-readable findings with full provenance.
 
 ## Repository layout
 

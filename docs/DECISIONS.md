@@ -68,3 +68,65 @@ officially supported SIFT install method. Iteration speed compounds over a
 3-week sprint.
 
 ---
+## D6 — 2026-05-25 — Case: SRL-2018 (rd01), single host depth
+
+**Decision:** Use the SRL-2018 Compromised Enterprise Network case as our single
+ground-truth case. Within it, focus on the `rd01` host (Remote Desktop Server 1)
+— the documented primary compromise host from the FOR508 Lab 1.1 scenario.
+
+**Why:**
+- Protocol SIFT's `~/.claude/case-templates/CLAUDE.md` is *written for this exact case*.
+  It ships with IOCs, a timeline, and tool invocations specific to SRL.
+- SANS published the evidence to all hackathon participants via the Devpost
+  starter case data link (`https://sansorg.egnyte.com/fl/HhH7crTYT4JK`),
+  shared by Rob T. Lee. Judges have it.
+- Single-host depth fits the rubric's explicit guidance: *"Depth on fewer types
+  beats shallow coverage of many."* (Section 6, judging criteria.)
+- rd01 has both disk image (`base-rd-01-cdrive.E01`, 16.6 GB) and memory dump
+  (`base-rd-02-memory.7z`, ~3 GB extracted). Full multi-source coverage on one host.
+- The case has documented ground truth (IOCs in the case template: STUN.exe,
+  msedge.exe masquerading, pssdnsvc.exe, atmfd.dll, lateral movement via
+  `net use H: \\172.16.6.12\c$\Users`). We can measure precision/recall against it.
+
+**Trade-off accepted:** We deliberately do not demo cross-host correlation
+in the primary submission. If time permits at the end of Week 3, we may add
+dc01 memory as a bonus stretch.
+
+---
+
+## D7 — 2026-05-25 — Output convention: `analysis/exports/reports/`
+
+**Decision:** GLAIVE writes outputs to `./analysis/`, `./exports/`, `./reports/`
+inside each case directory, matching Protocol SIFT's convention. We do not
+invent our own output layout (originally planned: `runs/case1/`).
+
+**Why:** Protocol SIFT's CLAUDE.md states the convention three times. The case
+template enforces it. Judges familiar with Protocol SIFT will look for outputs
+there. Matching the convention signals we read the platform's docs.
+
+**Practical effect:** The CLI command becomes
+`glaive investigate /cases/srl/` (operating on the case directory in-place)
+rather than `glaive investigate evidence/ --output runs/case1/`.
+
+---
+
+## D8 — 2026-05-25 — Schema design tested against the SRL findings
+
+**Decision:** The evidence graph schema (designed in `docs/EVIDENCE_GRAPH_SCHEMA.md`)
+must be tested by attempting to represent every documented finding from the SRL
+case template *before* implementation begins. If the schema cannot express a
+finding, the schema is incomplete.
+
+**Why:** Reading the case template revealed schema gaps we'd otherwise have
+discovered mid-implementation:
+- File nodes need an `exists` property (for findings like "atmfd.dll listed
+  in Autoruns but absent from filesystem").
+- A `References` edge type from RegistryKey/Autoruns to File is required.
+- Node-level anomaly properties matter, not just graph edges (e.g.,
+  "msedge.exe masquerading" is a property check, not a relationship).
+- Multi-host scoping requires `Host` as a top-level scope; `(host, pid)`
+  identifier pairs prevent collision.
+
+The "schema fits findings" exercise is the design's primary correctness check.
+
+---
