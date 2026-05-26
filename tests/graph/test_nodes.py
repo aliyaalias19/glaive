@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from glaive.graph.nodes import Host, NetworkEndpoint, User
+from glaive.graph.nodes import File, Host, NetworkEndpoint, RegistryKey, User
 
 
 VALID_HASH = "a" * 64
@@ -386,3 +386,665 @@ class TestNetworkEndpoint:
         h = Host(evidence_hash=VALID_HASH, derivation="src", hostname="rd01")
         with pytest.raises(TypeError):
             n.merge_into(h)
+
+
+# =============================================================================
+# File
+# =============================================================================
+
+
+from datetime import datetime, timezone
+
+
+HASH_STUN = "deadbeef" * 8  # 64 hex chars
+HASH_OTHER = "c0ffee" * 10 + "abcd"  # 64 hex chars
+
+
+class TestFile:
+    """Schema section 2.3 — File node."""
+
+    def test_minimal_construction(self) -> None:
+        f = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls rd01.E01",
+            host_hostname="rd01",
+            full_path="C:\\Windows\\System32\\STUN.exe",
+        )
+        assert f.host_hostname == "rd01"
+        assert f.on_disk is False  # default
+        assert f.is_deleted is False
+        assert f.referenced_by == []
+
+    # ---- canonical_key ----
+
+    def test_canonical_key_normalizes_path(self) -> None:
+        """Backslashes -> forward, lowercased."""
+        f = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="rd01",
+            full_path="C:\\Windows\\System32\\STUN.exe",
+        )
+        assert f.canonical_key() == ("File", "rd01", "c:/windows/system32/stun.exe")
+
+    def test_canonical_key_strips_nt_prefix(self) -> None:
+        """\\??\\C:\\... -> c:/..."""
+        f = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="rd01",
+            full_path="\\??\\C:\\Users\\admin\\file.txt",
+        )
+        assert f.canonical_key() == ("File", "rd01", "c:/users/admin/file.txt")
+
+    def test_canonical_keys_match_across_case_differences(self) -> None:
+        """Two ingestions with case differences = same canonical key."""
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="rd01",
+            full_path="C:\\WINDOWS\\System32\\STUN.exe",
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="autorunsc",
+            host_hostname="rd01",
+            full_path="c:\\windows\\system32\\stun.exe",
+        )
+        assert f1.canonical_key() == f2.canonical_key()
+
+    def test_canonical_keys_distinguish_hosts(self) -> None:
+        """Same path on rd01 and dc01 = different nodes."""
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="rd01",
+            full_path="C:\\Windows\\System32\\STUN.exe",
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="dc01",
+            full_path="C:\\Windows\\System32\\STUN.exe",
+        )
+        assert f1.canonical_key() != f2.canonical_key()
+
+    # ---- the negative-evidence pattern ----
+
+    def test_atmfd_dll_pattern(self) -> None:
+        """The canonical 'referenced in Autoruns but absent from disk' pattern.
+
+        Schema-promised use case: a finding can claim 'deleted/missing malware'
+        when referenced_by is non-empty AND on_disk is False.
+        """
+        f = File(
+            evidence_hash=VALID_HASH,
+            derivation="autorunsc",
+            host_hostname="rd01",
+            full_path="C:\\Windows\\System32\\atmfd.dll",
+            on_disk=False,
+            referenced_by=["autoruns"],
+        )
+        assert f.on_disk is False
+        assert "autoruns" in f.referenced_by
+
+    # ---- merge_into ----
+
+    def test_merge_unions_referenced_by(self) -> None:
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="autorunsc",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            referenced_by=["autoruns"],
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="shimcache",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            referenced_by=["shimcache", "amcache"],
+        )
+        f1.merge_into(f2)
+        assert f1.referenced_by == ["autoruns", "shimcache", "amcache"]
+
+    def test_merge_referenced_by_deduplicates(self) -> None:
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            referenced_by=["autoruns", "shimcache"],
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            referenced_by=["shimcache", "amcache"],
+        )
+        f1.merge_into(f2)
+        assert f1.referenced_by == ["autoruns", "shimcache", "amcache"]
+        # shimcache appears once, not twice
+
+    def test_merge_on_disk_uses_or(self) -> None:
+        """If any source confirms disk presence, on_disk becomes True."""
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="autorunsc",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            on_disk=False,
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            on_disk=True,
+        )
+        f1.merge_into(f2)
+        assert f1.on_disk is True
+
+    def test_merge_hash_conflict_raises(self) -> None:
+        """Different sha256 on same path means different file — should not merge."""
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            sha256=HASH_STUN,
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            sha256=HASH_OTHER,
+        )
+        with pytest.raises(ValueError, match="Hash conflict"):
+            f1.merge_into(f2)
+
+    def test_merge_fills_null_hash(self) -> None:
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            sha256=HASH_STUN,
+        )
+        f1.merge_into(f2)
+        assert f1.sha256 == HASH_STUN
+
+    def test_merge_mtime_keeps_earliest(self) -> None:
+        """mtime/ctime/btime keep the earliest known."""
+        early = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        later = datetime(2023, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            mtime=later,
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            mtime=early,
+        )
+        f1.merge_into(f2)
+        assert f1.mtime == early
+
+    def test_merge_atime_keeps_latest(self) -> None:
+        """atime keeps the latest known."""
+        early = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        later = datetime(2023, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            atime=early,
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            atime=later,
+        )
+        f1.merge_into(f2)
+        assert f1.atime == later
+
+    def test_merge_rejects_non_file(self) -> None:
+        f = File(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+        )
+        h = Host(evidence_hash=VALID_HASH, derivation="src", hostname="rd01")
+        with pytest.raises(TypeError):
+            f.merge_into(h)
+
+
+# =============================================================================
+# File
+# =============================================================================
+
+
+from datetime import datetime, timezone
+
+
+HASH_STUN = "deadbeef" * 8  # 64 hex chars
+HASH_OTHER = "c0ffee" * 10 + "abcd"  # 64 hex chars
+
+
+class TestFile:
+    """Schema section 2.3 — File node."""
+
+    def test_minimal_construction(self) -> None:
+        f = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls rd01.E01",
+            host_hostname="rd01",
+            full_path="C:\\Windows\\System32\\STUN.exe",
+        )
+        assert f.host_hostname == "rd01"
+        assert f.on_disk is False  # default
+        assert f.is_deleted is False
+        assert f.referenced_by == []
+
+    # ---- canonical_key ----
+
+    def test_canonical_key_normalizes_path(self) -> None:
+        """Backslashes -> forward, lowercased."""
+        f = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="rd01",
+            full_path="C:\\Windows\\System32\\STUN.exe",
+        )
+        assert f.canonical_key() == ("File", "rd01", "c:/windows/system32/stun.exe")
+
+    def test_canonical_key_strips_nt_prefix(self) -> None:
+        """\\??\\C:\\... -> c:/..."""
+        f = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="rd01",
+            full_path="\\??\\C:\\Users\\admin\\file.txt",
+        )
+        assert f.canonical_key() == ("File", "rd01", "c:/users/admin/file.txt")
+
+    def test_canonical_keys_match_across_case_differences(self) -> None:
+        """Two ingestions with case differences = same canonical key."""
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="rd01",
+            full_path="C:\\WINDOWS\\System32\\STUN.exe",
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="autorunsc",
+            host_hostname="rd01",
+            full_path="c:\\windows\\system32\\stun.exe",
+        )
+        assert f1.canonical_key() == f2.canonical_key()
+
+    def test_canonical_keys_distinguish_hosts(self) -> None:
+        """Same path on rd01 and dc01 = different nodes."""
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="rd01",
+            full_path="C:\\Windows\\System32\\STUN.exe",
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="dc01",
+            full_path="C:\\Windows\\System32\\STUN.exe",
+        )
+        assert f1.canonical_key() != f2.canonical_key()
+
+    # ---- the negative-evidence pattern ----
+
+    def test_atmfd_dll_pattern(self) -> None:
+        """The canonical 'referenced in Autoruns but absent from disk' pattern.
+
+        Schema-promised use case: a finding can claim 'deleted/missing malware'
+        when referenced_by is non-empty AND on_disk is False.
+        """
+        f = File(
+            evidence_hash=VALID_HASH,
+            derivation="autorunsc",
+            host_hostname="rd01",
+            full_path="C:\\Windows\\System32\\atmfd.dll",
+            on_disk=False,
+            referenced_by=["autoruns"],
+        )
+        assert f.on_disk is False
+        assert "autoruns" in f.referenced_by
+
+    # ---- merge_into ----
+
+    def test_merge_unions_referenced_by(self) -> None:
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="autorunsc",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            referenced_by=["autoruns"],
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="shimcache",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            referenced_by=["shimcache", "amcache"],
+        )
+        f1.merge_into(f2)
+        assert f1.referenced_by == ["autoruns", "shimcache", "amcache"]
+
+    def test_merge_referenced_by_deduplicates(self) -> None:
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            referenced_by=["autoruns", "shimcache"],
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            referenced_by=["shimcache", "amcache"],
+        )
+        f1.merge_into(f2)
+        assert f1.referenced_by == ["autoruns", "shimcache", "amcache"]
+        # shimcache appears once, not twice
+
+    def test_merge_on_disk_uses_or(self) -> None:
+        """If any source confirms disk presence, on_disk becomes True."""
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="autorunsc",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            on_disk=False,
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="fls",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            on_disk=True,
+        )
+        f1.merge_into(f2)
+        assert f1.on_disk is True
+
+    def test_merge_hash_conflict_raises(self) -> None:
+        """Different sha256 on same path means different file — should not merge."""
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            sha256=HASH_STUN,
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            sha256=HASH_OTHER,
+        )
+        with pytest.raises(ValueError, match="Hash conflict"):
+            f1.merge_into(f2)
+
+    def test_merge_fills_null_hash(self) -> None:
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            sha256=HASH_STUN,
+        )
+        f1.merge_into(f2)
+        assert f1.sha256 == HASH_STUN
+
+    def test_merge_mtime_keeps_earliest(self) -> None:
+        """mtime/ctime/btime keep the earliest known."""
+        early = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        later = datetime(2023, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            mtime=later,
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            mtime=early,
+        )
+        f1.merge_into(f2)
+        assert f1.mtime == early
+
+    def test_merge_atime_keeps_latest(self) -> None:
+        """atime keeps the latest known."""
+        early = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        later = datetime(2023, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+        f1 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            atime=early,
+        )
+        f2 = File(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+            atime=later,
+        )
+        f1.merge_into(f2)
+        assert f1.atime == later
+
+    def test_merge_rejects_non_file(self) -> None:
+        f = File(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            host_hostname="rd01",
+            full_path="C:\\foo.exe",
+        )
+        h = Host(evidence_hash=VALID_HASH, derivation="src", hostname="rd01")
+        with pytest.raises(TypeError):
+            f.merge_into(h)
+
+
+# =============================================================================
+# RegistryKey
+# =============================================================================
+
+
+class TestRegistryKey:
+    """Schema section 2.4 — RegistryKey node."""
+
+    def test_minimal_construction(self) -> None:
+        rk = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="recmd SYSTEM",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="CurrentControlSet\\Services\\pssdnsvc",
+        )
+        assert rk.value_name is None
+        assert rk.value_data is None
+
+    def test_canonical_key_with_value_name(self) -> None:
+        rk = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="recmd",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="CurrentControlSet\\Services\\pssdnsvc",
+            value_name="ImagePath",
+        )
+        assert rk.canonical_key() == (
+            "RegistryKey",
+            "rd01",
+            "SYSTEM",
+            "currentcontrolset/services/pssdnsvc",
+            "ImagePath",
+        )
+
+    def test_canonical_key_for_key_itself(self) -> None:
+        rk = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="recmd",
+            host_hostname="rd01",
+            hive_name="SOFTWARE",
+            key_path="Microsoft\\Windows\\CurrentVersion\\Run",
+        )
+        # value_name is None — represents the key itself
+        assert rk.canonical_key()[-1] is None
+
+    def test_canonical_key_normalizes_path(self) -> None:
+        """Backslashes -> forward, lowercased, leading/trailing slashes stripped."""
+        rk1 = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="\\CurrentControlSet\\Services\\foo\\",
+        )
+        rk2 = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="CurrentControlSet/Services/FOO",
+        )
+        assert rk1.canonical_key() == rk2.canonical_key()
+
+    def test_canonical_keys_distinguish_hives(self) -> None:
+        """Same key path in SYSTEM vs SOFTWARE = different nodes."""
+        rk1 = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="foo\\bar",
+        )
+        rk2 = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            host_hostname="rd01",
+            hive_name="SOFTWARE",
+            key_path="foo\\bar",
+        )
+        assert rk1.canonical_key() != rk2.canonical_key()
+
+    def test_merge_takes_latest_write_time(self) -> None:
+        early = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        late = datetime(2023, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+        rk1 = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="foo",
+            value_data="old",
+            last_write_time=early,
+        )
+        rk2 = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="foo",
+            value_data="new",
+            last_write_time=late,
+        )
+        rk1.merge_into(rk2)
+        assert rk1.value_data == "new"
+        assert rk1.last_write_time == late
+
+    def test_merge_keeps_self_when_newer(self) -> None:
+        early = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        late = datetime(2023, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+        rk1 = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="foo",
+            value_data="newer",
+            last_write_time=late,
+        )
+        rk2 = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="foo",
+            value_data="older",
+            last_write_time=early,
+        )
+        rk1.merge_into(rk2)
+        assert rk1.value_data == "newer"  # self is newer, kept
+
+    def test_merge_fills_nulls(self) -> None:
+        rk1 = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="foo",
+        )
+        rk2 = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="foo",
+            value_data="something",
+            value_type="REG_SZ",
+        )
+        rk1.merge_into(rk2)
+        assert rk1.value_data == "something"
+        assert rk1.value_type == "REG_SZ"
+
+    def test_merge_rejects_non_registrykey(self) -> None:
+        rk = RegistryKey(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            host_hostname="rd01",
+            hive_name="SYSTEM",
+            key_path="foo",
+        )
+        h = Host(evidence_hash=VALID_HASH, derivation="src", hostname="rd01")
+        with pytest.raises(TypeError):
+            rk.merge_into(h)
