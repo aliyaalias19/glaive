@@ -126,3 +126,45 @@ class Edge(GraphElement):
     def merge_into(self, other: "Edge") -> None:
         """Default merge: do nothing. Subclasses with confirmed_by override this."""
         return None
+
+
+class MultiSourceEdge(Edge):
+    """An edge with multi-source corroboration tracking.
+
+    Used by edges representing discrete forensic events that multiple sources
+    can independently attest to (Spawned, Executed, Connected, Wrote, Read,
+    Deleted, Logon).
+
+    The `confirmed_by` list accumulates source identifiers as more evidence
+    is ingested. The `confidence` computed property derives:
+      - len(confirmed_by) >= 2 -> "confirmed"
+      - len(confirmed_by) == 1 -> "suspected"
+      - len(confirmed_by) == 0 -> "inferred"
+
+    See schema section 4.4.
+    """
+
+    confirmed_by: list[str] = Field(
+        default_factory=list,
+        description="Names of independent sources attesting to this event.",
+    )
+
+    @property
+    def confidence(self) -> str:
+        """Derive confidence from corroboration count. Schema section 4.4."""
+        n = len(self.confirmed_by)
+        if n >= 2:
+            return "confirmed"
+        if n == 1:
+            return "suspected"
+        return "inferred"
+
+    def merge_into(self, other: "Edge") -> None:
+        """Union confirmed_by lists with order-preserving dedup."""
+        if not isinstance(other, MultiSourceEdge):
+            raise TypeError(
+                f"Cannot merge {type(other).__name__} into MultiSourceEdge subclass"
+            )
+        for src in other.confirmed_by:
+            if src not in self.confirmed_by:
+                self.confirmed_by.append(src)

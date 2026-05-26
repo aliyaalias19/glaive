@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from pydantic import ValidationError
 
-from glaive.graph.base import Edge, GraphElement, Node
+from glaive.graph.base import Edge, GraphElement, MultiSourceEdge, Node
 
 
 # A valid SHA-256 hex string for use in tests (64 lowercase hex chars).
@@ -223,3 +223,107 @@ def test_node_subclass_without_abstract_methods_cannot_instantiate() -> None:
         BadNode(evidence_hash=VALID_SHA256, derivation="test")
     msg = str(exc_info.value).lower()
     assert "abstract" in msg
+
+
+# ---------- MultiSourceEdge — confirmed_by + confidence pattern ---------------
+
+
+class _ConcreteMultiSourceEdge(MultiSourceEdge):
+    """Minimal subclass for testing MultiSourceEdge contract."""
+
+    edge_type = "TestMSEdge"
+
+
+def test_multisource_edge_confidence_inferred_when_empty() -> None:
+    """confirmed_by=[] -> confidence='inferred'."""
+    e = _ConcreteMultiSourceEdge(
+        evidence_hash=VALID_SHA256,
+        derivation="test",
+        source_key=("a",),
+        target_key=("b",),
+    )
+    assert e.confirmed_by == []
+    assert e.confidence == "inferred"
+
+
+def test_multisource_edge_confidence_suspected_when_one_source() -> None:
+    """One source -> confidence='suspected'."""
+    e = _ConcreteMultiSourceEdge(
+        evidence_hash=VALID_SHA256,
+        derivation="test",
+        source_key=("a",),
+        target_key=("b",),
+        confirmed_by=["evtx_4688"],
+    )
+    assert e.confidence == "suspected"
+
+
+def test_multisource_edge_confidence_confirmed_when_two_or_more() -> None:
+    """Two or more sources -> confidence='confirmed'."""
+    e = _ConcreteMultiSourceEdge(
+        evidence_hash=VALID_SHA256,
+        derivation="test",
+        source_key=("a",),
+        target_key=("b",),
+        confirmed_by=["evtx_4688", "prefetch"],
+    )
+    assert e.confidence == "confirmed"
+
+
+def test_multisource_edge_merge_unions_confirmed_by() -> None:
+    """Merging two edges unions their confirmed_by lists."""
+    e1 = _ConcreteMultiSourceEdge(
+        evidence_hash=VALID_SHA256,
+        derivation="src1",
+        source_key=("a",),
+        target_key=("b",),
+        confirmed_by=["evtx_4688"],
+    )
+    e2 = _ConcreteMultiSourceEdge(
+        evidence_hash=VALID_SHA256,
+        derivation="src2",
+        source_key=("a",),
+        target_key=("b",),
+        confirmed_by=["prefetch", "amcache"],
+    )
+    e1.merge_into(e2)
+    assert e1.confirmed_by == ["evtx_4688", "prefetch", "amcache"]
+    assert e1.confidence == "confirmed"
+
+
+def test_multisource_edge_merge_deduplicates() -> None:
+    """Same source name appearing twice = one entry."""
+    e1 = _ConcreteMultiSourceEdge(
+        evidence_hash=VALID_SHA256,
+        derivation="src1",
+        source_key=("a",),
+        target_key=("b",),
+        confirmed_by=["evtx_4688", "prefetch"],
+    )
+    e2 = _ConcreteMultiSourceEdge(
+        evidence_hash=VALID_SHA256,
+        derivation="src2",
+        source_key=("a",),
+        target_key=("b",),
+        confirmed_by=["prefetch", "amcache"],
+    )
+    e1.merge_into(e2)
+    assert e1.confirmed_by == ["evtx_4688", "prefetch", "amcache"]
+
+
+def test_multisource_edge_merge_rejects_non_multisource() -> None:
+    """Merging a plain Edge into a MultiSourceEdge raises TypeError."""
+    ms = _ConcreteMultiSourceEdge(
+        evidence_hash=VALID_SHA256,
+        derivation="src",
+        source_key=("a",),
+        target_key=("b",),
+    )
+    plain = _ConcreteEdge(
+        evidence_hash=VALID_SHA256,
+        derivation="src",
+        source_key=("a",),
+        target_key=("b",),
+    )
+    with pytest.raises(TypeError):
+        ms.merge_into(plain)
