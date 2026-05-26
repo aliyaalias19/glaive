@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from glaive.graph.edges import Connected, Deleted, Executed, Read, Spawned, Wrote
+from glaive.graph.edges import AuthenticatedAs, Connected, Deleted, Executed, Loaded, Logon, Modified, Persisted, Read, References, Spawned, Wrote
 
 
 VALID_HASH = "a" * 64
@@ -401,3 +401,393 @@ class TestDeleted:
         )
         e1.merge_into(e2)
         assert e1.confidence == "confirmed"
+
+
+# =============================================================================
+# AuthenticatedAs
+# =============================================================================
+
+
+class TestAuthenticatedAs:
+    """Schema section 3.5 — AuthenticatedAs edge (Process state)."""
+
+    def test_minimal_construction(self) -> None:
+        e = AuthenticatedAs(
+            evidence_hash=VALID_HASH,
+            derivation="vol windows.getsids",
+            source_key=PROC_STUN,
+            target_key=USER_RSYDOW,
+        )
+        assert e.logon_type is None
+        assert e.is_elevated is False
+
+    def test_full_construction(self) -> None:
+        e = AuthenticatedAs(
+            evidence_hash=VALID_HASH,
+            derivation="getsids+evtx_4624",
+            source_key=PROC_STUN,
+            target_key=USER_RSYDOW,
+            logon_type=10,
+            is_elevated=True,
+        )
+        assert e.logon_type == 10
+        assert e.is_elevated is True
+
+    def test_canonical_key_includes_edge_type(self) -> None:
+        e = AuthenticatedAs(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            source_key=PROC_STUN,
+            target_key=USER_RSYDOW,
+        )
+        assert e.canonical_key()[2] == "AuthenticatedAs"
+
+    def test_default_merge_is_noop(self) -> None:
+        """AuthenticatedAs inherits plain Edge.merge_into() which is a no-op."""
+        e1 = AuthenticatedAs(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            source_key=PROC_STUN,
+            target_key=USER_RSYDOW,
+            logon_type=10,
+        )
+        e2 = AuthenticatedAs(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            source_key=PROC_STUN,
+            target_key=USER_RSYDOW,
+            logon_type=3,
+        )
+        # Default Edge.merge_into is no-op — state of self preserved
+        e1.merge_into(e2)
+        assert e1.logon_type == 10
+
+
+# =============================================================================
+# Logon
+# =============================================================================
+
+
+HOST_RD01 = ("Host", "rd01")  # using hostname identity since no machine_guid
+
+
+class TestLogon:
+    """Schema section 3.6 — Logon edge (event)."""
+
+    def test_minimal_construction(self) -> None:
+        e = Logon(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_4624",
+            source_key=USER_RSYDOW,
+            target_key=HOST_RD01,
+        )
+        assert e.success is True  # default
+        assert e.source_ip is None
+        assert e.failure_reason is None
+
+    def test_rdp_logon_pattern(self) -> None:
+        """The SRL case: rsydow-a logs onto rd01 via RDP from 172.15.1.20."""
+        ts = datetime(2023, 1, 25, 14, 50, 0, tzinfo=timezone.utc)
+        e = Logon(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_4624 + evtx_1149",
+            source_key=USER_RSYDOW,
+            target_key=HOST_RD01,
+            timestamp=ts,
+            logon_type=10,
+            source_ip="172.15.1.20",
+            success=True,
+            confirmed_by=["evtx_4624", "evtx_1149"],
+        )
+        assert e.logon_type == 10
+        assert e.source_ip == "172.15.1.20"
+        assert e.confidence == "confirmed"
+
+    def test_failed_logon(self) -> None:
+        """EVTX 4625 represents a failure event."""
+        ts = datetime(2023, 1, 25, 14, 45, 0, tzinfo=timezone.utc)
+        e = Logon(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_4625",
+            source_key=USER_RSYDOW,
+            target_key=HOST_RD01,
+            timestamp=ts,
+            logon_type=3,
+            success=False,
+            failure_reason="Bad password",
+        )
+        assert e.success is False
+        assert e.failure_reason == "Bad password"
+
+    def test_canonical_key_includes_edge_type(self) -> None:
+        ts = datetime(2023, 1, 25, 14, 50, 0, tzinfo=timezone.utc)
+        e = Logon(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            source_key=USER_RSYDOW,
+            target_key=HOST_RD01,
+            timestamp=ts,
+        )
+        assert e.canonical_key()[2] == "Logon"
+
+    def test_merge_unions_confirmed_by(self) -> None:
+        ts = datetime(2023, 1, 25, 14, 50, 0, tzinfo=timezone.utc)
+        e1 = Logon(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_4624",
+            source_key=USER_RSYDOW,
+            target_key=HOST_RD01,
+            timestamp=ts,
+            confirmed_by=["evtx_4624"],
+        )
+        e2 = Logon(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_1149",
+            source_key=USER_RSYDOW,
+            target_key=HOST_RD01,
+            timestamp=ts,
+            confirmed_by=["evtx_1149"],
+        )
+        e1.merge_into(e2)
+        assert e1.confidence == "confirmed"
+
+
+# =============================================================================
+# Persisted
+# =============================================================================
+
+
+class TestPersisted:
+    """Schema section 3.9 — Persisted edge."""
+
+    def test_minimal_construction(self) -> None:
+        e = Persisted(
+            evidence_hash=VALID_HASH,
+            derivation="cross_correlation",
+            source_key=FILE_STUN,
+            target_key=TASK_STUN,
+        )
+        assert e.mechanism is None
+        assert e.confidence == "inferred"
+
+    def test_stun_persistence_pattern(self) -> None:
+        """The SRL case: STUN.exe persisted via scheduled task."""
+        e = Persisted(
+            evidence_hash=VALID_HASH,
+            derivation="task_xml + mft_timing",
+            source_key=FILE_STUN,
+            target_key=TASK_STUN,
+            mechanism="scheduled_task",
+        )
+        assert e.mechanism == "scheduled_task"
+
+    def test_canonical_key_includes_edge_type(self) -> None:
+        e = Persisted(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            source_key=FILE_STUN,
+            target_key=TASK_STUN,
+        )
+        assert e.canonical_key()[2] == "Persisted"
+
+    def test_merge_unions_confirmed_by(self) -> None:
+        e1 = Persisted(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            source_key=FILE_STUN,
+            target_key=TASK_STUN,
+            mechanism="scheduled_task",
+            confirmed_by=["task_xml"],
+        )
+        e2 = Persisted(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            source_key=FILE_STUN,
+            target_key=TASK_STUN,
+            mechanism="scheduled_task",
+            confirmed_by=["evtx_4698"],
+        )
+        e1.merge_into(e2)
+        assert e1.confidence == "confirmed"
+
+
+# =============================================================================
+# Loaded
+# =============================================================================
+
+
+MODULE_KERNEL32 = ("Module", "rd01", "c:/windows/system32/kernel32.dll", 0x7FFE12340000)
+
+
+class TestLoaded:
+    """Schema section 3.2 — Loaded edge."""
+
+    def test_minimal_construction(self) -> None:
+        e = Loaded(
+            evidence_hash=VALID_HASH,
+            derivation="vol windows.dlllist",
+            source_key=PROC_STUN,
+            target_key=MODULE_KERNEL32,
+        )
+        assert e.load_address is None
+        assert e.confidence == "inferred"
+
+    def test_with_load_address(self) -> None:
+        e = Loaded(
+            evidence_hash=VALID_HASH,
+            derivation="dlllist",
+            source_key=PROC_STUN,
+            target_key=MODULE_KERNEL32,
+            load_address=0x7FFE12340000,
+        )
+        assert e.load_address == 0x7FFE12340000
+
+    def test_canonical_key_includes_edge_type(self) -> None:
+        e = Loaded(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            source_key=PROC_STUN,
+            target_key=MODULE_KERNEL32,
+        )
+        assert e.canonical_key()[2] == "Loaded"
+
+
+# =============================================================================
+# Modified
+# =============================================================================
+
+
+REGKEY_RUN_UPDATER = (
+    "RegistryKey",
+    "rd01",
+    "NTUSER.DAT",
+    "software/microsoft/windows/currentversion/run",
+    "Updater",
+)
+
+
+class TestModified:
+    """Schema section 3.7 — Modified edge."""
+
+    def test_minimal_construction(self) -> None:
+        e = Modified(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_4657",
+            source_key=PROC_STUN,
+            target_key=REGKEY_RUN_UPDATER,
+        )
+        assert e.operation is None
+        assert e.old_value is None
+        assert e.new_value is None
+
+    def test_with_operation_and_values(self) -> None:
+        ts = datetime(2023, 1, 25, 14, 51, 0, tzinfo=timezone.utc)
+        e = Modified(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_4657",
+            source_key=PROC_STUN,
+            target_key=REGKEY_RUN_UPDATER,
+            timestamp=ts,
+            operation="create",
+            new_value="C:\\Windows\\System32\\STUN.exe",
+        )
+        assert e.operation == "create"
+        assert e.new_value == "C:\\Windows\\System32\\STUN.exe"
+
+    def test_canonical_key_includes_edge_type(self) -> None:
+        e = Modified(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            source_key=PROC_STUN,
+            target_key=REGKEY_RUN_UPDATER,
+        )
+        assert e.canonical_key()[2] == "Modified"
+
+
+# =============================================================================
+# References  (negative-evidence partner)
+# =============================================================================
+
+
+FILE_ATMFD = ("File", "rd01", "c:/windows/system32/atmfd.dll")
+REGKEY_AUTORUNS = (
+    "RegistryKey",
+    "rd01",
+    "SOFTWARE",
+    "microsoft/windows nt/currentversion/windows",
+    "AppInit_DLLs",
+)
+
+
+class TestReferences:
+    """Schema section 3.8 — References edge.
+
+    This is the negative-evidence partner: a References edge to a File
+    with on_disk=False represents 'deleted/missing malware' (e.g., atmfd.dll
+    in Autoruns but absent from filesystem).
+    """
+
+    def test_minimal_construction(self) -> None:
+        """reference_type is REQUIRED — the kind of reference matters."""
+        e = References(
+            evidence_hash=VALID_HASH,
+            derivation="autorunsc",
+            source_key=REGKEY_AUTORUNS,
+            target_key=FILE_ATMFD,
+            reference_type="autorun",
+        )
+        assert e.reference_type == "autorun"
+
+    def test_reference_type_required(self) -> None:
+        """Without reference_type, validation should fail."""
+        with pytest.raises(ValidationError):
+            References(  # type: ignore[call-arg]
+                evidence_hash=VALID_HASH,
+                derivation="autorunsc",
+                source_key=REGKEY_AUTORUNS,
+                target_key=FILE_ATMFD,
+            )
+
+    def test_atmfd_pattern_construction(self) -> None:
+        """The atmfd.dll canonical demo pattern: References edge to a File
+        whose on_disk attribute would be False at the node level."""
+        e = References(
+            evidence_hash=VALID_HASH,
+            derivation="autorunsc",
+            source_key=REGKEY_AUTORUNS,
+            target_key=FILE_ATMFD,
+            reference_type="autorun",
+        )
+        # The edge itself doesn't know about File.on_disk; that's a separate
+        # query against the target node. This test verifies the edge construct
+        # is sound for the demo pattern.
+        assert e.target_key == FILE_ATMFD
+
+    def test_canonical_key_includes_edge_type(self) -> None:
+        e = References(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            source_key=REGKEY_AUTORUNS,
+            target_key=FILE_ATMFD,
+            reference_type="autorun",
+        )
+        assert e.canonical_key()[2] == "References"
+
+    def test_default_merge_is_noop(self) -> None:
+        """References inherits plain Edge.merge_into() = no-op."""
+        e1 = References(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            source_key=REGKEY_AUTORUNS,
+            target_key=FILE_ATMFD,
+            reference_type="autorun",
+        )
+        e2 = References(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            source_key=REGKEY_AUTORUNS,
+            target_key=FILE_ATMFD,
+            reference_type="autorun",
+        )
+        e1.merge_into(e2)  # should not raise, no-op
+        assert e1.reference_type == "autorun"
