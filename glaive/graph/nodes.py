@@ -473,3 +473,347 @@ class Process(Node):
             bucket.append(mine)
         if theirs not in bucket:
             bucket.append(theirs)
+
+
+class Process(Node):
+    """A running or formerly-running process on a host.
+
+    Schema reference: section 2.2.
+    Identity: (host_hostname, pid, start_time).
+
+    image_path is intentionally NOT in identity — supports hollowing detection
+    as a finding rather than a node-identity ruling.
+    """
+
+    node_type: ClassVar[str] = "Process"
+
+    host_hostname: str = Field(..., description="Hostname of the host.")
+    pid: int = Field(..., ge=0, description="Process ID.")
+    name: str = Field(..., description="Image base name, e.g., 'STUN.exe'.")
+    image_path: str | None = Field(None, description="e.g., 'C:\\\\Windows\\\\System32\\\\STUN.exe'.")
+    command_line: str | None = Field(None, description="Full command line if known.")
+    parent_pid: int | None = Field(None, ge=0)
+    start_time: datetime | None = Field(
+        None, description="EPROCESS start time. None if unknown."
+    )
+    exit_time: datetime | None = Field(None, description="When process exited; None if running.")
+    sha256: str | None = Field(None, description="SHA-256 of image_path file if computable.")
+
+    # Multi-source identification pattern (Principle 4 + schema 4.2)
+    observed_by: list[str] = Field(
+        default_factory=list,
+        description="Tools/plugins that observed this process: 'psscan', 'pslist', 'pstree', 'evtx_4688', etc.",
+    )
+
+    # Disagreements pattern (schema section 5)
+    disagreements: dict[str, list] = Field(
+        default_factory=dict,
+        description="Conflicting non-identity observations from different tools. "
+        "Key = field name, Value = list of {value, source} dicts.",
+    )
+
+    def canonical_key(self) -> tuple[Any, ...]:
+        """Identity: (host, pid, start_time). Schema section 5.2."""
+        return ("Process", self.host_hostname, self.pid, self.start_time)
+
+    def _record_disagreement(self, field_name: str, value: Any, source: str) -> None:
+        """Append a disagreeing value to the disagreements dict."""
+        self.disagreements.setdefault(field_name, []).append(
+            {"value": value, "source": source}
+        )
+
+    def merge_into(self, other: "Node") -> None:
+        """Merge per schema section 5.2.
+
+        - Null scalars filled from other
+        - observed_by: union (dedup-preserved order)
+        - Conflicting non-null scalars recorded in disagreements (no winner)
+        - exit_time: take the latest (most recent observation wins)
+        """
+        if not isinstance(other, Process):
+            raise TypeError(f"Cannot merge {type(other).__name__} into Process")
+
+        # Track the source of `other` for disagreement records
+        other_source = other.derivation
+
+        # Scalar fields: fill nulls, record conflicts
+        scalar_fields = ("image_path", "command_line", "parent_pid", "sha256")
+        for field in scalar_fields:
+            mine = getattr(self, field)
+            theirs = getattr(other, field)
+            if mine is None and theirs is not None:
+                setattr(self, field, theirs)
+            elif mine is not None and theirs is not None and mine != theirs:
+                # Conflict — record both values, don't pick a winner
+                self._record_disagreement(field, theirs, other_source)
+
+        # name is required; if they differ it's a real disagreement too
+        if self.name != other.name:
+            self._record_disagreement("name", other.name, other_source)
+
+        # exit_time: take latest known
+        if self.exit_time is None and other.exit_time is not None:
+            self.exit_time = other.exit_time
+        elif (
+            self.exit_time is not None
+            and other.exit_time is not None
+            and other.exit_time > self.exit_time
+        ):
+            self.exit_time = other.exit_time
+
+        # observed_by: union with order-preserving dedup
+        for obs in other.observed_by:
+            if obs not in self.observed_by:
+                self.observed_by.append(obs)
+
+        # Merge other's accumulated disagreements into ours
+        for field_name, conflicts in other.disagreements.items():
+            self.disagreements.setdefault(field_name, []).extend(conflicts)
+
+
+class ScheduledTask(Node):
+    """A Windows Task Scheduler entry.
+
+    Schema reference: section 2.7.
+    Identity: (host_hostname, task_path).
+    """
+
+    node_type: ClassVar[str] = "ScheduledTask"
+
+    host_hostname: str = Field(..., description="Hostname of the host.")
+    task_path: str = Field(..., description="e.g., '\\\\Microsoft\\\\Windows\\\\STUN'.")
+    author: str | None = Field(None, description="Task XML Author element.")
+    command: str | None = Field(None, description="Task action: Exec/Command.")
+    arguments: str | None = Field(None, description="Task action: Exec/Arguments.")
+    trigger_type: str | None = Field(
+        None, description="Boot / Logon / Time / Event / Daily / etc."
+    )
+    is_enabled: bool = Field(True, description="From task XML Settings/Enabled. Default true.")
+    last_run_time: datetime | None = Field(None)
+
+    # Disagreements pattern (same as Process)
+    disagreements: dict[str, list] = Field(default_factory=dict)
+
+    def canonical_key(self) -> tuple[Any, ...]:
+        return ("ScheduledTask", self.host_hostname, self.task_path)
+
+    def _record_disagreement(self, field_name: str, value: Any, source: str) -> None:
+        self.disagreements.setdefault(field_name, []).append(
+            {"value": value, "source": source}
+        )
+
+    def merge_into(self, other: "Node") -> None:
+        """Fill nulls, record disagreements on command/arguments/trigger_type."""
+        if not isinstance(other, ScheduledTask):
+            raise TypeError(f"Cannot merge {type(other).__name__} into ScheduledTask")
+
+        other_source = other.derivation
+
+        scalar_fields = ("author", "command", "arguments", "trigger_type")
+        for field in scalar_fields:
+            mine = getattr(self, field)
+            theirs = getattr(other, field)
+            if mine is None and theirs is not None:
+                setattr(self, field, theirs)
+            elif mine is not None and theirs is not None and mine != theirs:
+                self._record_disagreement(field, theirs, other_source)
+
+        # is_enabled: take other's value (latest observation wins)
+        # If you've observed it as disabled, that supersedes earlier "enabled" assumption
+        if not other.is_enabled:
+            self.is_enabled = False
+
+        # last_run_time: take latest known
+        if self.last_run_time is None and other.last_run_time is not None:
+            self.last_run_time = other.last_run_time
+        elif (
+            self.last_run_time is not None
+            and other.last_run_time is not None
+            and other.last_run_time > self.last_run_time
+        ):
+            self.last_run_time = other.last_run_time
+
+        # Merge accumulated disagreements
+        for field_name, conflicts in other.disagreements.items():
+            self.disagreements.setdefault(field_name, []).extend(conflicts)
+
+
+class Service(Node):
+    """A Windows service.
+
+    Schema reference: section 2.8.
+    Identity: (host_hostname, service_name).
+    """
+
+    node_type: ClassVar[str] = "Service"
+
+    host_hostname: str = Field(..., description="Hostname of the host.")
+    service_name: str = Field(..., description="e.g., 'pssdnsvc'.")
+    display_name: str | None = Field(None)
+    image_path: str | None = Field(None, description="Registry ImagePath value.")
+    start_type: str | None = Field(
+        None, description="'Auto' / 'Manual' / 'Disabled' / 'Boot' / 'System'."
+    )
+    service_account: str | None = Field(
+        None, description="e.g., 'LocalSystem', 'LocalService'."
+    )
+    is_running: bool | None = Field(
+        None, description="From memory svcscan; None if unknown."
+    )
+
+    # Disagreements pattern
+    disagreements: dict[str, list] = Field(default_factory=dict)
+
+    def canonical_key(self) -> tuple[Any, ...]:
+        return ("Service", self.host_hostname, self.service_name)
+
+    def _record_disagreement(self, field_name: str, value: Any, source: str) -> None:
+        self.disagreements.setdefault(field_name, []).append(
+            {"value": value, "source": source}
+        )
+
+    def merge_into(self, other: "Node") -> None:
+        """Fill nulls, record disagreements. is_running: memory wins.
+
+        Schema section 5.8.
+        """
+        if not isinstance(other, Service):
+            raise TypeError(f"Cannot merge {type(other).__name__} into Service")
+
+        other_source = other.derivation
+
+        scalar_fields = ("display_name", "image_path", "start_type", "service_account")
+        for field in scalar_fields:
+            mine = getattr(self, field)
+            theirs = getattr(other, field)
+            if mine is None and theirs is not None:
+                setattr(self, field, theirs)
+            elif mine is not None and theirs is not None and mine != theirs:
+                self._record_disagreement(field, theirs, other_source)
+
+        # is_running: memory source takes precedence over registry-derived data
+        # If self is None and other has a value, take it
+        if self.is_running is None and other.is_running is not None:
+            self.is_running = other.is_running
+        elif (
+            self.is_running is not None
+            and other.is_running is not None
+            and self.is_running != other.is_running
+        ):
+            # Conflict on is_running. Memory ("svcscan") wins.
+            # Determine which derivation is the memory source.
+            if "svcscan" in other.derivation.lower():
+                self.is_running = other.is_running
+
+        # Merge accumulated disagreements
+        for field_name, conflicts in other.disagreements.items():
+            self.disagreements.setdefault(field_name, []).extend(conflicts)
+
+
+class Module(Node):
+    """A DLL or driver loaded into a process or the kernel.
+
+    Schema reference: section 2.9.
+    Identity: (host_hostname, image_path_normalized, base_address).
+
+    Drivers are collapsed into Module with is_kernel=True (v1 simplification).
+    """
+
+    node_type: ClassVar[str] = "Module"
+
+    host_hostname: str = Field(..., description="Hostname of the host.")
+    image_path: str = Field(..., description="Full path of the module image.")
+    base_address: int = Field(..., ge=0, description="Load address in memory.")
+    size: int | None = Field(None, ge=0, description="Image size in bytes.")
+    sha256: str | None = Field(None, description="SHA-256 of image_path file if computable.")
+    is_kernel: bool = Field(False, description="True for drivers loaded into the kernel.")
+
+    # Multi-source identification (same pattern as Process)
+    observed_by: list[str] = Field(
+        default_factory=list,
+        description="'dlllist' / 'modules' / 'modscan'. Hidden if modscan-only.",
+    )
+
+    def canonical_key(self) -> tuple[Any, ...]:
+        return (
+            "Module",
+            self.host_hostname,
+            _normalize_path(self.image_path),
+            self.base_address,
+        )
+
+    def merge_into(self, other: "Node") -> None:
+        """Standard null-fill + observed_by union. Hash conflict raises.
+
+        Schema section 5.9.
+        """
+        if not isinstance(other, Module):
+            raise TypeError(f"Cannot merge {type(other).__name__} into Module")
+
+        # Hash conflict on same identity is a logic error (different module bytes)
+        if self.sha256 and other.sha256 and self.sha256 != other.sha256:
+            raise ValueError(
+                f"Hash conflict on module {self.image_path} @ {self.base_address:#x}: "
+                f"{self.sha256[:8]} vs {other.sha256[:8]}"
+            )
+
+        if self.sha256 is None and other.sha256 is not None:
+            self.sha256 = other.sha256
+        if self.size is None and other.size is not None:
+            self.size = other.size
+
+        # is_kernel should be deterministic from base_address range — don't allow flip
+        if self.is_kernel != other.is_kernel:
+            raise ValueError(
+                f"is_kernel mismatch on module {self.image_path}: "
+                f"{self.is_kernel} vs {other.is_kernel}. Different identity intended?"
+            )
+
+        # observed_by union with order-preserving dedup
+        for obs in other.observed_by:
+            if obs not in self.observed_by:
+                self.observed_by.append(obs)
+
+
+class AntivirusDetection(Node):
+    """A Windows Defender detection event.
+
+    Schema reference: section 2.10.
+    Identity: (host_hostname, event_id, detection_time, threat_name).
+
+    Each detection event is a distinct node — repeated detections of the
+    same threat produce multiple nodes (one per event), enabling 'how many
+    times was this killed?' queries.
+    """
+
+    node_type: ClassVar[str] = "AntivirusDetection"
+
+    host_hostname: str = Field(..., description="Hostname of the host.")
+    event_id: int = Field(..., description="1116 / 1117 / 1118 / 1119 / 5001.")
+    threat_name: str = Field(..., description="e.g., 'Trojan:Win32/PowerRunner.A'.")
+    detection_time: datetime = Field(..., description="EVTX timestamp (required for identity).")
+    action_taken: str | None = Field(
+        None, description="'Quarantined' / 'Removed' / 'Allowed' / etc."
+    )
+    file_path: str | None = Field(None, description="Path of the detected binary.")
+
+    def canonical_key(self) -> tuple[Any, ...]:
+        return (
+            "AntivirusDetection",
+            self.host_hostname,
+            self.event_id,
+            self.detection_time,
+            self.threat_name,
+        )
+
+    def merge_into(self, other: "Node") -> None:
+        """Trivial merge — identity is so specific that same-identity means
+        the same event. Just fill nulls.
+        """
+        if not isinstance(other, AntivirusDetection):
+            raise TypeError(f"Cannot merge {type(other).__name__} into AntivirusDetection")
+
+        if self.action_taken is None and other.action_taken is not None:
+            self.action_taken = other.action_taken
+        if self.file_path is None and other.file_path is not None:
+            self.file_path = other.file_path

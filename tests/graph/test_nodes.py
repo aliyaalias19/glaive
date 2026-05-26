@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from glaive.graph.nodes import File, Host, NetworkEndpoint, RegistryKey, User
+from glaive.graph.nodes import AntivirusDetection, File, Host, Module, NetworkEndpoint, Process, RegistryKey, ScheduledTask, Service, User
 
 
 VALID_HASH = "a" * 64
@@ -1048,3 +1048,912 @@ class TestRegistryKey:
         h = Host(evidence_hash=VALID_HASH, derivation="src", hostname="rd01")
         with pytest.raises(TypeError):
             rk.merge_into(h)
+
+
+# =============================================================================
+# Process
+# =============================================================================
+
+
+class TestProcess:
+    """Schema section 2.2 — Process node. The most complex v1 node."""
+
+    # ---- construction ----
+
+    def test_minimal_construction(self) -> None:
+        p = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+        )
+        assert p.pid == 1912
+        assert p.name == "STUN.exe"
+        assert p.image_path is None
+        assert p.observed_by == []
+        assert p.disagreements == {}
+
+    def test_full_construction(self) -> None:
+        start = datetime(2023, 1, 25, 14, 52, 4, tzinfo=timezone.utc)
+        p = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            image_path="C:\\Windows\\System32\\STUN.exe",
+            command_line="STUN.exe --listen 0.0.0.0",
+            parent_pid=1244,
+            start_time=start,
+            observed_by=["psscan", "pslist"],
+        )
+        assert p.parent_pid == 1244
+        assert "psscan" in p.observed_by
+
+    def test_pid_must_be_non_negative(self) -> None:
+        with pytest.raises(ValidationError):
+            Process(
+                evidence_hash=VALID_HASH,
+                derivation="psscan",
+                host_hostname="rd01",
+                pid=-1,
+                name="bad.exe",
+            )
+
+    def test_name_required(self) -> None:
+        with pytest.raises(ValidationError):
+            Process(
+                evidence_hash=VALID_HASH,
+                derivation="psscan",
+                host_hostname="rd01",
+                pid=1912,
+            )  # type: ignore[call-arg]
+
+    # ---- canonical_key (3-element identity) ----
+
+    def test_canonical_key_three_elements(self) -> None:
+        start = datetime(2023, 1, 25, 14, 52, 4, tzinfo=timezone.utc)
+        p = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            start_time=start,
+        )
+        assert p.canonical_key() == ("Process", "rd01", 1912, start)
+
+    def test_canonical_key_with_none_start_time(self) -> None:
+        """start_time can be None — still a valid (but less specific) key."""
+        p = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+        )
+        assert p.canonical_key() == ("Process", "rd01", 1912, None)
+
+    def test_canonical_keys_distinguish_pids(self) -> None:
+        """Same name on same host but different PID = different processes."""
+        p1 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+        )
+        p2 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=1913,
+            name="STUN.exe",
+        )
+        assert p1.canonical_key() != p2.canonical_key()
+
+    def test_canonical_keys_distinguish_pid_recycling(self) -> None:
+        """Same PID with different start_times = different processes (PID recycling)."""
+        early = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        late = datetime(2023, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+        p1 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=4,
+            name="System",
+            start_time=early,
+        )
+        p2 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=4,
+            name="recycled.exe",
+            start_time=late,
+        )
+        assert p1.canonical_key() != p2.canonical_key()
+
+    def test_image_path_not_in_identity(self) -> None:
+        """Two processes with same (host, pid, start_time) but different image_paths
+        merge to one node — supports hollowing detection as a finding."""
+        start = datetime(2023, 1, 25, 14, 52, 4, tzinfo=timezone.utc)
+        p1 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=1912,
+            name="explorer.exe",
+            image_path="C:\\Windows\\explorer.exe",
+            start_time=start,
+        )
+        p2 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="memdump",
+            host_hostname="rd01",
+            pid=1912,
+            name="explorer.exe",
+            image_path="C:\\Temp\\evil.exe",  # different path, same PID
+            start_time=start,
+        )
+        assert p1.canonical_key() == p2.canonical_key()
+
+    # ---- observed_by multi-source pattern ----
+
+    def test_merge_unions_observed_by(self) -> None:
+        p1 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            observed_by=["psscan"],
+        )
+        p2 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="pslist",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            observed_by=["pslist", "pstree"],
+        )
+        p1.merge_into(p2)
+        assert p1.observed_by == ["psscan", "pslist", "pstree"]
+
+    def test_merge_observed_by_deduplicates(self) -> None:
+        p1 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            observed_by=["psscan", "pslist"],
+        )
+        p2 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            observed_by=["pslist", "pstree"],
+        )
+        p1.merge_into(p2)
+        assert p1.observed_by == ["psscan", "pslist", "pstree"]
+        # pslist appears once
+
+    def test_hidden_process_pattern(self) -> None:
+        """The canonical 'observed by psscan but not pslist' = hidden pattern."""
+        p = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=1912,
+            name="hidden.exe",
+            observed_by=["psscan"],
+        )
+        # Schema-promised query: psscan ∈ observed_by AND pslist ∉ observed_by
+        assert "psscan" in p.observed_by
+        assert "pslist" not in p.observed_by
+
+    # ---- disagreements pattern ----
+
+    def test_merge_fills_null_image_path(self) -> None:
+        p1 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+        )
+        p2 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            image_path="C:\\Windows\\System32\\STUN.exe",
+        )
+        p1.merge_into(p2)
+        assert p1.image_path == "C:\\Windows\\System32\\STUN.exe"
+        assert p1.disagreements == {}  # null fill is not a disagreement
+
+    def test_merge_records_command_line_disagreement(self) -> None:
+        """If two sources report different command lines, BOTH are retained."""
+        p1 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="windows.cmdline",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            command_line="STUN.exe --listen 0.0.0.0",
+        )
+        p2 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_4688",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            command_line="STUN.exe --listen 127.0.0.1",
+        )
+        p1.merge_into(p2)
+        # Self's original value is kept
+        assert p1.command_line == "STUN.exe --listen 0.0.0.0"
+        # The other's value is in disagreements
+        assert "command_line" in p1.disagreements
+        assert len(p1.disagreements["command_line"]) == 1
+        recorded = p1.disagreements["command_line"][0]
+        assert recorded["value"] == "STUN.exe --listen 127.0.0.1"
+        assert recorded["source"] == "evtx_4688"
+
+    def test_merge_records_name_disagreement(self) -> None:
+        """If two sources report different names for same PID/start_time, record."""
+        p1 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="psscan",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+        )
+        p2 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_4688",
+            host_hostname="rd01",
+            pid=1912,
+            name="StUn.EXE",  # case differs
+        )
+        p1.merge_into(p2)
+        assert "name" in p1.disagreements
+
+    def test_merge_does_not_record_disagreement_on_matching_values(self) -> None:
+        p1 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            command_line="STUN.exe",
+        )
+        p2 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            command_line="STUN.exe",
+        )
+        p1.merge_into(p2)
+        assert p1.disagreements == {}
+
+    def test_merge_propagates_existing_disagreements(self) -> None:
+        """If other already has accumulated disagreements, merge them in."""
+        p1 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+        )
+        p2 = Process(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+            disagreements={"command_line": [{"value": "alt", "source": "prior"}]},
+        )
+        p1.merge_into(p2)
+        assert "command_line" in p1.disagreements
+        assert p1.disagreements["command_line"][0]["source"] == "prior"
+
+    def test_merge_rejects_non_process(self) -> None:
+        p = Process(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            host_hostname="rd01",
+            pid=1912,
+            name="STUN.exe",
+        )
+        h = Host(evidence_hash=VALID_HASH, derivation="src", hostname="rd01")
+        with pytest.raises(TypeError):
+            p.merge_into(h)
+
+
+# =============================================================================
+# ScheduledTask
+# =============================================================================
+
+
+class TestScheduledTask:
+    """Schema section 2.7 — ScheduledTask node."""
+
+    def test_minimal_construction(self) -> None:
+        t = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="task_xml",
+            host_hostname="rd01",
+            task_path="\\Microsoft\\Windows\\STUN",
+        )
+        assert t.task_path == "\\Microsoft\\Windows\\STUN"
+        assert t.is_enabled is True  # default true
+        assert t.command is None
+
+    def test_canonical_key(self) -> None:
+        t = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="task_xml",
+            host_hostname="rd01",
+            task_path="\\Microsoft\\Windows\\STUN",
+        )
+        assert t.canonical_key() == (
+            "ScheduledTask",
+            "rd01",
+            "\\Microsoft\\Windows\\STUN",
+        )
+
+    def test_canonical_keys_distinguish_hosts(self) -> None:
+        t1 = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="task_xml",
+            host_hostname="rd01",
+            task_path="\\Microsoft\\Windows\\STUN",
+        )
+        t2 = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="task_xml",
+            host_hostname="dc01",
+            task_path="\\Microsoft\\Windows\\STUN",
+        )
+        assert t1.canonical_key() != t2.canonical_key()
+
+    def test_merge_fills_null_command(self) -> None:
+        t1 = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_4698",
+            host_hostname="rd01",
+            task_path="\\STUN",
+        )
+        t2 = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="task_xml",
+            host_hostname="rd01",
+            task_path="\\STUN",
+            command="C:\\Windows\\System32\\STUN.exe",
+            arguments="--daemon",
+        )
+        t1.merge_into(t2)
+        assert t1.command == "C:\\Windows\\System32\\STUN.exe"
+        assert t1.arguments == "--daemon"
+
+    def test_merge_records_command_disagreement(self) -> None:
+        """XML says one command, EVTX 4698 says another — keep both."""
+        t1 = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="task_xml",
+            host_hostname="rd01",
+            task_path="\\STUN",
+            command="C:\\Windows\\System32\\STUN.exe",
+        )
+        t2 = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_4698",
+            host_hostname="rd01",
+            task_path="\\STUN",
+            command="C:\\Temp\\different.exe",
+        )
+        t1.merge_into(t2)
+        assert t1.command == "C:\\Windows\\System32\\STUN.exe"  # self retained
+        assert "command" in t1.disagreements
+        assert t1.disagreements["command"][0]["value"] == "C:\\Temp\\different.exe"
+
+    def test_merge_disabled_supersedes_enabled(self) -> None:
+        """If any source observes the task as disabled, that takes precedence."""
+        t1 = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            task_path="\\STUN",
+            is_enabled=True,
+        )
+        t2 = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            task_path="\\STUN",
+            is_enabled=False,
+        )
+        t1.merge_into(t2)
+        assert t1.is_enabled is False
+
+    def test_merge_last_run_time_takes_latest(self) -> None:
+        early = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        late = datetime(2023, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+        t1 = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            task_path="\\STUN",
+            last_run_time=early,
+        )
+        t2 = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            task_path="\\STUN",
+            last_run_time=late,
+        )
+        t1.merge_into(t2)
+        assert t1.last_run_time == late
+
+    def test_merge_rejects_non_scheduledtask(self) -> None:
+        t = ScheduledTask(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            host_hostname="rd01",
+            task_path="\\STUN",
+        )
+        h = Host(evidence_hash=VALID_HASH, derivation="src", hostname="rd01")
+        with pytest.raises(TypeError):
+            t.merge_into(h)
+
+
+# =============================================================================
+# Service
+# =============================================================================
+
+
+class TestService:
+    """Schema section 2.8 — Service node."""
+
+    def test_minimal_construction(self) -> None:
+        s = Service(
+            evidence_hash=VALID_HASH,
+            derivation="recmd SYSTEM",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+        )
+        assert s.service_name == "pssdnsvc"
+        assert s.is_running is None
+        assert s.image_path is None
+
+    def test_canonical_key(self) -> None:
+        s = Service(
+            evidence_hash=VALID_HASH,
+            derivation="recmd",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+        )
+        assert s.canonical_key() == ("Service", "rd01", "pssdnsvc")
+
+    def test_canonical_keys_distinguish_hosts(self) -> None:
+        s1 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="recmd",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+        )
+        s2 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="recmd",
+            host_hostname="dc01",
+            service_name="pssdnsvc",
+        )
+        assert s1.canonical_key() != s2.canonical_key()
+
+    def test_merge_fills_null_image_path(self) -> None:
+        s1 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="vol windows.svcscan",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+        )
+        s2 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="recmd SYSTEM",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+            image_path="C:\\Windows\\pssdnsvc.exe",
+            start_type="Auto",
+        )
+        s1.merge_into(s2)
+        assert s1.image_path == "C:\\Windows\\pssdnsvc.exe"
+        assert s1.start_type == "Auto"
+
+    def test_merge_records_image_path_disagreement(self) -> None:
+        s1 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+            image_path="C:\\Windows\\pssdnsvc.exe",
+        )
+        s2 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+            image_path="C:\\Different\\path.exe",
+        )
+        s1.merge_into(s2)
+        assert s1.image_path == "C:\\Windows\\pssdnsvc.exe"
+        assert "image_path" in s1.disagreements
+
+    def test_merge_is_running_memory_wins(self) -> None:
+        """When registry says one thing and memory svcscan says another, svcscan wins."""
+        s1 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="recmd SYSTEM",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+            is_running=False,
+        )
+        s2 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="vol windows.svcscan rd01-memory.img",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+            is_running=True,
+        )
+        s1.merge_into(s2)
+        # svcscan (memory) said True, that wins
+        assert s1.is_running is True
+
+    def test_merge_is_running_registry_does_not_override_memory(self) -> None:
+        """Reverse case: memory in self, registry in other. Memory stays."""
+        s1 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="vol windows.svcscan rd01-memory.img",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+            is_running=True,
+        )
+        s2 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="recmd SYSTEM",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+            is_running=False,
+        )
+        s1.merge_into(s2)
+        # self had memory data, that stays
+        assert s1.is_running is True
+
+    def test_merge_fills_null_is_running(self) -> None:
+        s1 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="recmd",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+        )
+        s2 = Service(
+            evidence_hash=VALID_HASH,
+            derivation="svcscan",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+            is_running=True,
+        )
+        s1.merge_into(s2)
+        assert s1.is_running is True
+
+    def test_merge_rejects_non_service(self) -> None:
+        s = Service(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            host_hostname="rd01",
+            service_name="pssdnsvc",
+        )
+        h = Host(evidence_hash=VALID_HASH, derivation="src", hostname="rd01")
+        with pytest.raises(TypeError):
+            s.merge_into(h)
+
+
+# =============================================================================
+# Module
+# =============================================================================
+
+
+class TestModule:
+    """Schema section 2.9 — Module node (covers DLLs and drivers)."""
+
+    def test_minimal_construction(self) -> None:
+        m = Module(
+            evidence_hash=VALID_HASH,
+            derivation="vol windows.dlllist",
+            host_hostname="rd01",
+            image_path="C:\\Windows\\System32\\kernel32.dll",
+            base_address=0x7FFE12340000,
+        )
+        assert m.image_path == "C:\\Windows\\System32\\kernel32.dll"
+        assert m.is_kernel is False  # default
+        assert m.observed_by == []
+
+    def test_kernel_module_construction(self) -> None:
+        m = Module(
+            evidence_hash=VALID_HASH,
+            derivation="vol windows.modules",
+            host_hostname="rd01",
+            image_path="C:\\Windows\\System32\\drivers\\ntfs.sys",
+            base_address=0xFFFFF800_12340000,
+            is_kernel=True,
+        )
+        assert m.is_kernel is True
+
+    def test_canonical_key_includes_base_address(self) -> None:
+        """Same DLL at different addresses = different nodes."""
+        m1 = Module(
+            evidence_hash=VALID_HASH,
+            derivation="dlllist",
+            host_hostname="rd01",
+            image_path="C:\\Windows\\System32\\kernel32.dll",
+            base_address=0x7FFE12340000,
+        )
+        m2 = Module(
+            evidence_hash=VALID_HASH,
+            derivation="dlllist",
+            host_hostname="rd01",
+            image_path="C:\\Windows\\System32\\kernel32.dll",
+            base_address=0x7FFE56780000,
+        )
+        assert m1.canonical_key() != m2.canonical_key()
+
+    def test_canonical_key_normalizes_image_path(self) -> None:
+        """Same DLL with case difference in path = same node."""
+        m1 = Module(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            image_path="C:\\WINDOWS\\System32\\KERNEL32.dll",
+            base_address=0x7FFE12340000,
+        )
+        m2 = Module(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            image_path="c:\\windows\\system32\\kernel32.dll",
+            base_address=0x7FFE12340000,
+        )
+        assert m1.canonical_key() == m2.canonical_key()
+
+    # ---- observed_by / hidden pattern ----
+
+    def test_merge_unions_observed_by(self) -> None:
+        m1 = Module(
+            evidence_hash=VALID_HASH,
+            derivation="modules",
+            host_hostname="rd01",
+            image_path="C:\\foo.sys",
+            base_address=0xFFFFF800_00000000,
+            is_kernel=True,
+            observed_by=["modules"],
+        )
+        m2 = Module(
+            evidence_hash=VALID_HASH,
+            derivation="modscan",
+            host_hostname="rd01",
+            image_path="C:\\foo.sys",
+            base_address=0xFFFFF800_00000000,
+            is_kernel=True,
+            observed_by=["modscan"],
+        )
+        m1.merge_into(m2)
+        assert m1.observed_by == ["modules", "modscan"]
+
+    def test_hidden_driver_pattern(self) -> None:
+        """A driver observed by modscan but not modules = rootkit indicator."""
+        m = Module(
+            evidence_hash=VALID_HASH,
+            derivation="vol windows.modscan",
+            host_hostname="rd01",
+            image_path="C:\\Windows\\System32\\drivers\\rootkit.sys",
+            base_address=0xFFFFF800_DEADBEEF,
+            is_kernel=True,
+            observed_by=["modscan"],
+        )
+        # Schema-promised query: modscan in observed_by AND modules NOT in observed_by
+        assert "modscan" in m.observed_by
+        assert "modules" not in m.observed_by
+
+    def test_merge_hash_conflict_raises(self) -> None:
+        h1 = "deadbeef" * 8
+        h2 = "feedface" * 8
+        m1 = Module(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            image_path="C:\\foo.dll",
+            base_address=0x10000000,
+            sha256=h1,
+        )
+        m2 = Module(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            image_path="C:\\foo.dll",
+            base_address=0x10000000,
+            sha256=h2,
+        )
+        with pytest.raises(ValueError, match="Hash conflict"):
+            m1.merge_into(m2)
+
+    def test_merge_is_kernel_mismatch_raises(self) -> None:
+        """is_kernel disagreement is a canonicalization bug, not a merge."""
+        m1 = Module(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            image_path="C:\\foo.dll",
+            base_address=0x10000000,
+            is_kernel=False,
+        )
+        m2 = Module(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            image_path="C:\\foo.dll",
+            base_address=0x10000000,
+            is_kernel=True,
+        )
+        with pytest.raises(ValueError, match="is_kernel mismatch"):
+            m1.merge_into(m2)
+
+    def test_merge_rejects_non_module(self) -> None:
+        m = Module(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            host_hostname="rd01",
+            image_path="C:\\foo.dll",
+            base_address=0x10000000,
+        )
+        h = Host(evidence_hash=VALID_HASH, derivation="src", hostname="rd01")
+        with pytest.raises(TypeError):
+            m.merge_into(h)
+
+
+# =============================================================================
+# AntivirusDetection
+# =============================================================================
+
+
+class TestAntivirusDetection:
+    """Schema section 2.10 — AntivirusDetection node."""
+
+    def test_minimal_construction(self) -> None:
+        detection_time = datetime(2023, 1, 25, 15, 0, 0, tzinfo=timezone.utc)
+        a = AntivirusDetection(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_defender_1117",
+            host_hostname="rd01",
+            event_id=1117,
+            threat_name="Trojan:Win32/PowerRunner.A",
+            detection_time=detection_time,
+        )
+        assert a.threat_name == "Trojan:Win32/PowerRunner.A"
+        assert a.action_taken is None
+        assert a.file_path is None
+
+    def test_full_construction(self) -> None:
+        detection_time = datetime(2023, 1, 25, 15, 0, 0, tzinfo=timezone.utc)
+        a = AntivirusDetection(
+            evidence_hash=VALID_HASH,
+            derivation="evtx_defender_1117",
+            host_hostname="rd01",
+            event_id=1117,
+            threat_name="Trojan:Win32/PowerRunner.A",
+            detection_time=detection_time,
+            action_taken="Quarantined",
+            file_path="C:\\Users\\rsydow\\AppData\\Local\\Temp\\msedge.exe",
+        )
+        assert a.action_taken == "Quarantined"
+        assert "msedge.exe" in a.file_path
+
+    def test_detection_time_required(self) -> None:
+        """detection_time is part of identity, so it's required."""
+        with pytest.raises(ValidationError):
+            AntivirusDetection(  # type: ignore[call-arg]
+                evidence_hash=VALID_HASH,
+                derivation="evtx",
+                host_hostname="rd01",
+                event_id=1117,
+                threat_name="X",
+            )
+
+    def test_canonical_key_includes_all_identity_fields(self) -> None:
+        detection_time = datetime(2023, 1, 25, 15, 0, 0, tzinfo=timezone.utc)
+        a = AntivirusDetection(
+            evidence_hash=VALID_HASH,
+            derivation="evtx",
+            host_hostname="rd01",
+            event_id=1117,
+            threat_name="Trojan:Win32/PowerRunner.A",
+            detection_time=detection_time,
+        )
+        assert a.canonical_key() == (
+            "AntivirusDetection",
+            "rd01",
+            1117,
+            detection_time,
+            "Trojan:Win32/PowerRunner.A",
+        )
+
+    def test_repeated_detections_are_distinct(self) -> None:
+        """Same threat detected at two different times = two different nodes.
+
+        Schema-promised use case: 'msedge.exe was killed repeatedly'.
+        """
+        t1 = datetime(2023, 1, 25, 15, 0, 0, tzinfo=timezone.utc)
+        t2 = datetime(2023, 1, 25, 15, 5, 0, tzinfo=timezone.utc)
+        a1 = AntivirusDetection(
+            evidence_hash=VALID_HASH,
+            derivation="evtx",
+            host_hostname="rd01",
+            event_id=1117,
+            threat_name="Trojan:Win32/PowerRunner.A",
+            detection_time=t1,
+        )
+        a2 = AntivirusDetection(
+            evidence_hash=VALID_HASH,
+            derivation="evtx",
+            host_hostname="rd01",
+            event_id=1117,
+            threat_name="Trojan:Win32/PowerRunner.A",
+            detection_time=t2,
+        )
+        assert a1.canonical_key() != a2.canonical_key()
+
+    def test_merge_fills_null_action_taken(self) -> None:
+        detection_time = datetime(2023, 1, 25, 15, 0, 0, tzinfo=timezone.utc)
+        a1 = AntivirusDetection(
+            evidence_hash=VALID_HASH,
+            derivation="src1",
+            host_hostname="rd01",
+            event_id=1117,
+            threat_name="X",
+            detection_time=detection_time,
+        )
+        a2 = AntivirusDetection(
+            evidence_hash=VALID_HASH,
+            derivation="src2",
+            host_hostname="rd01",
+            event_id=1117,
+            threat_name="X",
+            detection_time=detection_time,
+            action_taken="Quarantined",
+            file_path="C:\\foo.exe",
+        )
+        a1.merge_into(a2)
+        assert a1.action_taken == "Quarantined"
+        assert a1.file_path == "C:\\foo.exe"
+
+    def test_merge_rejects_non_avdetection(self) -> None:
+        detection_time = datetime(2023, 1, 25, 15, 0, 0, tzinfo=timezone.utc)
+        a = AntivirusDetection(
+            evidence_hash=VALID_HASH,
+            derivation="src",
+            host_hostname="rd01",
+            event_id=1117,
+            threat_name="X",
+            detection_time=detection_time,
+        )
+        h = Host(evidence_hash=VALID_HASH, derivation="src", hostname="rd01")
+        with pytest.raises(TypeError):
+            a.merge_into(h)
