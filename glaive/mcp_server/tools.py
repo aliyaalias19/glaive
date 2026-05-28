@@ -327,3 +327,73 @@ def do_get_node_provenance(
         }
 
     return provenance
+
+
+# =============================================================================
+# commit_finding — THE GATE (Decision M3, M11)
+# =============================================================================
+
+
+def do_commit_finding(
+    session: GlaiveSession,
+    claim: str,
+    supporting_node_keys: list[list[Any]],
+    confidence_hint: str = "suspected",
+) -> dict[str, Any]:
+    """Commit a finding to the investigation report — through the gate.
+
+    The gate (FindingReport.can_commit) enforces:
+      1. At least one supporting key
+      2. Every supporting key resolves to a real graph node
+      3. confidence_hint is checked against graph evidence; downgraded if
+         the evidence doesn't justify it (never upgraded)
+
+    On 'accepted' or 'downgraded_confidence', the finding IS committed
+    (M11: a downgraded finding is still real, just less certain).
+    On rejection, nothing is committed and the agent receives the reason.
+
+    Returns the CommitDecision as a dict — the agent's self-correction signal.
+    """
+    # Validate confidence_hint
+    valid_levels = {"confirmed", "suspected", "inferred", "disputed"}
+    if confidence_hint not in valid_levels:
+        return {
+            "status": "error",
+            "error": "bad_confidence_hint",
+            "message": f"confidence_hint must be one of {sorted(valid_levels)}.",
+        }
+
+    # Coerce each supporting key (string datetimes -> datetimes) so graph
+    # lookups in the gate succeed (reuses Step 5 infrastructure).
+    coerced_keys = [_coerce_key(k) for k in supporting_node_keys]
+
+    decision = session.report.can_commit(
+        claim=claim,
+        supporting_node_keys=coerced_keys,
+        confidence_hint=confidence_hint,  # type: ignore[arg-type]
+        graph=session.graph,
+    )
+
+    # Commit on accept or downgrade (both carry a valid Finding)
+    committed = False
+    finding_id = None
+    if decision.status in ("accepted", "downgraded_confidence") and decision.finding:
+        session.report.commit(decision.finding)
+        committed = True
+        finding_id = decision.finding.finding_id
+
+    result: dict[str, Any] = {
+        "status": "ok" if committed else "rejected",
+        "decision": decision.status,
+        "reason": decision.reason,
+        "committed": committed,
+    }
+    if finding_id:
+        result["finding_id"] = finding_id
+    if decision.agent_confidence_hint is not None:
+        result["agent_confidence_hint"] = decision.agent_confidence_hint
+    if decision.final_confidence is not None:
+        result["final_confidence"] = decision.final_confidence
+    result["total_findings"] = len(session.report.findings)
+
+    return result

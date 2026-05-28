@@ -76,6 +76,27 @@ def build_server(session: GlaiveSession) -> FastMCP:
         """
         return tools.do_get_node_provenance(session, canonical_key)
 
+    @mcp.tool()
+    def commit_finding(
+        claim: str,
+        supporting_node_keys: list,
+        confidence_hint: str = "suspected",
+    ) -> dict:
+        """Commit a forensic finding to the investigation report.
+
+        This is the ONLY way to record a finding. Every finding must be backed
+        by graph evidence:
+          - supporting_node_keys must each resolve to a real graph node
+            (obtain them from query_graph)
+          - confidence_hint ('confirmed'/'suspected'/'inferred'/'disputed') is
+            checked against graph evidence and downgraded if unsupported
+
+        Returns a decision: 'accepted', 'downgraded_confidence' (still
+        committed, at a lower confidence), 'rejected_missing_node', or
+        'rejected_empty_support'. Use the reason to self-correct.
+        """
+        return tools.do_commit_finding(session, claim, supporting_node_keys, confidence_hint)
+
     # Expose session on the server object for test access
     mcp._glaive_session = session  # type: ignore[attr-defined]
 
