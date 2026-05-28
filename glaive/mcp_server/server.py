@@ -18,6 +18,7 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 
 from glaive.mcp_server.session import GlaiveSession
+from glaive.mcp_server import tools
 
 
 def build_server(session: GlaiveSession) -> FastMCP:
@@ -27,8 +28,19 @@ def build_server(session: GlaiveSession) -> FastMCP:
     """
     mcp = FastMCP(name="glaive")
 
-    # ---- Tools registered in Steps 3-7 ----
-    # (none yet — scaffolding only)
+    @mcp.tool()
+    def ingest_artifact(path: str, source_type: str) -> dict:
+        """Ingest a forensic artifact into the evidence graph.
+
+        Args:
+            path: Filesystem path to the evidence file.
+            source_type: The kind of evidence. Currently supported:
+                'defender_evtx' (Windows Defender Operational event log).
+
+        Returns a summary dict: nodes added, evidence hash, records read,
+        and how many records were skipped as unsupported event types.
+        """
+        return tools.do_ingest_artifact(session, path, source_type)
 
     # Expose session on the server object for test access
     mcp._glaive_session = session  # type: ignore[attr-defined]
