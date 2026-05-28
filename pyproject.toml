@@ -16,6 +16,7 @@ dependencies = [
     # Forensic primitives (Python-native; SIFT also provides binaries)
     "volatility3>=2.7.0",
     "python-evtx>=0.8.0",
+    "lxml>=5.0",
     "regipy>=4.0.0",
     "pytsk3>=20231007",
     # Interface + reporting
