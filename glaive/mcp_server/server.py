@@ -62,6 +62,20 @@ def build_server(session: GlaiveSession) -> FastMCP:
         """
         return tools.do_query_graph(session, node_type, filters, limit)
 
+    @mcp.tool()
+    def get_node_provenance(canonical_key: list) -> dict:
+        """Trace a graph node back to its source evidence.
+
+        Args:
+            canonical_key: The node's key (as returned by query_graph).
+
+        Returns the full provenance chain: evidence_hash, derivation, the
+        source file's name and size, and (for multi-source nodes) the list
+        of tools that observed the node. This is how any finding is traced
+        to the bytes that produced it.
+        """
+        return tools.do_get_node_provenance(session, canonical_key)
+
     # Expose session on the server object for test access
     mcp._glaive_session = session  # type: ignore[attr-defined]
 

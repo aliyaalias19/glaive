@@ -228,3 +228,102 @@ def do_query_graph(
         "truncated": total_matched > len(matched),
         "nodes": matched,
     }
+
+
+# =============================================================================
+# Key coercion (shared by tools that accept a canonical_key from the agent)
+# =============================================================================
+
+from datetime import datetime as _dt  # local alias to avoid top-of-file edits
+
+
+def _coerce_key_element(elem: Any) -> Any:
+    """Convert an ISO-8601 datetime string back to a datetime; else passthrough.
+
+    query_graph serializes datetime elements of a canonical_key to isoformat
+    strings for JSON. When the agent sends a key back, we must restore the
+    datetime so graph lookups match (Decision M10).
+
+    A real string field (e.g. a threat name) won't parse as ISO datetime and
+    is returned unchanged.
+    """
+    if not isinstance(elem, str):
+        return elem
+    # Cheap pre-check: ISO datetimes start with a 4-digit year and contain 'T'
+    # or a date dash pattern. fromisoformat is the real validator.
+    try:
+        return _dt.fromisoformat(elem)
+    except ValueError:
+        return elem
+
+
+def _coerce_key(raw_key: list[Any] | tuple) -> tuple:
+    """Coerce a canonical_key from the agent (a JSON list) back to a tuple
+    with datetime elements restored."""
+    return tuple(_coerce_key_element(e) for e in raw_key)
+
+
+# =============================================================================
+# get_node_provenance
+# =============================================================================
+
+
+def do_get_node_provenance(
+    session: GlaiveSession, canonical_key: list[Any]
+) -> dict[str, Any]:
+    """Return the full provenance chain for a single graph node.
+
+    Args:
+        canonical_key: The node's key (as returned by query_graph).
+
+    Returns provenance: evidence_hash, derivation, observed_at, the evidence
+    store metadata (original filename, size), observed_by for multi-source
+    nodes, and display fields. This is the audit-trail tool.
+    """
+    key = _coerce_key(canonical_key)
+
+    if not session.graph.has_node(key):
+        return {
+            "status": "error",
+            "error": "node_not_found",
+            "message": (
+                f"No node with key {list(canonical_key)}. "
+                f"Use query_graph to obtain valid canonical_keys."
+            ),
+        }
+
+    node = session.graph.get_node(key)
+
+    # Core provenance fields (present on every node)
+    evidence_hash = getattr(node, "evidence_hash", None)
+    provenance: dict[str, Any] = {
+        "status": "ok",
+        "canonical_key": [
+            (e.isoformat() if hasattr(e, "isoformat") else e) for e in key
+        ],
+        "node_type": key[0],
+        "evidence_hash": evidence_hash,
+        "derivation": getattr(node, "derivation", None),
+    }
+
+    observed_at = getattr(node, "observed_at", None)
+    if observed_at is not None:
+        provenance["observed_at"] = (
+            observed_at.isoformat() if hasattr(observed_at, "isoformat") else observed_at
+        )
+
+    # Multi-source nodes carry observed_by
+    observed_by = getattr(node, "observed_by", None)
+    if observed_by:
+        provenance["observed_by"] = list(observed_by)
+
+    # Evidence store metadata — links hash back to the original file
+    if evidence_hash and session.store.has(evidence_hash):
+        meta = session.store.get_metadata(evidence_hash)
+        provenance["source_evidence"] = {
+            "original_name": meta.get("original_name"),
+            "size_bytes": meta.get("size_bytes"),
+            "ingested_at": meta.get("ingested_at"),
+        }
+
+    return provenance
