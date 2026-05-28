@@ -48,3 +48,6 @@ agent_traces/
 # But DO keep the README and a manifest describing what evidence to download
 !evidence_samples/README.md
 !evidence_samples/MANIFEST.yaml
+
+# Real evidence files for ingestion tests — never committed
+test_evidence/
