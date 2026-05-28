@@ -51,3 +51,6 @@ agent_traces/
 
 # Real evidence files for ingestion tests — never committed
 test_evidence/
+
+# Runtime investigation output (evidence store, reports)
+analysis/
