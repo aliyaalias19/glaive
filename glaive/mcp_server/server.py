@@ -42,6 +42,26 @@ def build_server(session: GlaiveSession) -> FastMCP:
         """
         return tools.do_ingest_artifact(session, path, source_type)
 
+    @mcp.tool()
+    def query_graph(
+        node_type: str | None = None,
+        filters: list[dict] | None = None,
+        limit: int = 100,
+    ) -> dict:
+        """Query the evidence graph for nodes matching declarative filters.
+
+        Args:
+            node_type: Optional node type to filter by (e.g. 'Process',
+                'AntivirusDetection', 'File', 'RegistryKey').
+            filters: Optional list of filters, each {"field","op","value"},
+                AND-combined. Supported ops: eq, contains, gt, lt, exists.
+            limit: Max nodes returned (default 100).
+
+        Returns matched node summaries including canonical_key (usable in
+        commit_finding and get_node_provenance) and evidence_hash.
+        """
+        return tools.do_query_graph(session, node_type, filters, limit)
+
     # Expose session on the server object for test access
     mcp._glaive_session = session  # type: ignore[attr-defined]
 
