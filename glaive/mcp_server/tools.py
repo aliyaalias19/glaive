@@ -397,3 +397,39 @@ def do_commit_finding(
     result["total_findings"] = len(session.report.findings)
 
     return result
+
+
+# =============================================================================
+# list_evidence
+# =============================================================================
+
+
+def do_list_evidence(session: GlaiveSession) -> dict[str, Any]:
+    """List all evidence ingested into this investigation session.
+
+    Returns each evidence file's hash, original name, size, ingest time, and
+    how many ingest runs have happened. This is the chain-of-custody view.
+    """
+    items = []
+    # The store's manifest maps hash -> metadata
+    for sha, meta in session.store._manifest.items():
+        items.append({
+            "evidence_hash": sha,
+            "original_name": meta.get("original_name"),
+            "size_bytes": meta.get("size_bytes"),
+            "ingested_at": meta.get("ingested_at"),
+        })
+
+    # Sort by ingest time for a stable, chronological view
+    items.sort(key=lambda x: x.get("ingested_at") or "")
+
+    return {
+        "status": "ok",
+        "evidence_count": len(items),
+        "ingest_runs": len(session.orchestrator.reports),
+        "evidence": items,
+        "graph_totals": {
+            "nodes": session.graph.node_count(),
+            "edges": session.graph.edge_count(),
+        },
+    }

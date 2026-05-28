@@ -97,6 +97,15 @@ def build_server(session: GlaiveSession) -> FastMCP:
         """
         return tools.do_commit_finding(session, claim, supporting_node_keys, confidence_hint)
 
+    @mcp.tool()
+    def list_evidence() -> dict:
+        """List all evidence ingested into this investigation.
+
+        Returns each evidence file's hash, original name, size, and ingest
+        time — the chain-of-custody view — plus current graph totals.
+        """
+        return tools.do_list_evidence(session)
+
     # Expose session on the server object for test access
     mcp._glaive_session = session  # type: ignore[attr-defined]
 
