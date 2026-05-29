@@ -225,3 +225,48 @@ class TestRetrieval:
             store.get_path("0" * 64)
         with pytest.raises(KeyError):
             store.get_metadata("0" * 64)
+
+
+# =============================================================================
+# list_all() public API
+# =============================================================================
+
+
+class TestListAll:
+    def test_empty_store_returns_empty_list(self, tmp_path: Path) -> None:
+        store = EvidenceStore(tmp_path / "store")
+        assert store.list_all() == []
+
+    def test_single_file_lists_with_metadata(self, tmp_path: Path) -> None:
+        store = EvidenceStore(tmp_path / "store")
+        source = tmp_path / "evidence.bin"
+        source.write_bytes(KNOWN_CONTENT)
+        sha = store.ingest(source)
+
+        items = store.list_all()
+        assert len(items) == 1
+        item = items[0]
+        assert item["evidence_hash"] == sha
+        assert item["original_name"] == "evidence.bin"
+        assert item["size_bytes"] == len(KNOWN_CONTENT)
+        assert "ingested_at" in item
+
+    def test_does_not_expose_internal_fields(self, tmp_path: Path) -> None:
+        """list_all() must not leak the on-disk stored_path (internal detail)."""
+        store = EvidenceStore(tmp_path / "store")
+        source = tmp_path / "x.bin"
+        source.write_bytes(KNOWN_CONTENT)
+        store.ingest(source)
+        item = store.list_all()[0]
+        assert "stored_path" not in item
+
+    def test_multiple_files_listed(self, tmp_path: Path) -> None:
+        store = EvidenceStore(tmp_path / "store")
+        for name, content in [("a.bin", b"alpha"), ("b.bin", b"beta"), ("c.bin", b"gamma")]:
+            f = tmp_path / name
+            f.write_bytes(content)
+            store.ingest(f)
+        items = store.list_all()
+        assert len(items) == 3
+        names = {item["original_name"] for item in items}
+        assert names == {"a.bin", "b.bin", "c.bin"}

@@ -125,6 +125,23 @@ class EvidenceStore:
             raise KeyError(f"Hash {sha[:16]}... not in evidence store")
         return dict(self._manifest[sha])  # copy to prevent external mutation
 
+    def list_all(self) -> list[dict]:
+        """Return metadata for every file in the store.
+
+        Each entry is {"evidence_hash", "original_name", "size_bytes",
+        "ingested_at"}. Internal fields (e.g. stored_path) are not exposed.
+        Order is not guaranteed; sort by ingested_at if needed.
+        """
+        return [
+            {
+                "evidence_hash": sha,
+                "original_name": meta.get("original_name"),
+                "size_bytes": meta.get("size_bytes"),
+                "ingested_at": meta.get("ingested_at"),
+            }
+            for sha, meta in self._manifest.items()
+        ]
+
     def __len__(self) -> int:
         return len(self._manifest)
 

@@ -410,15 +410,7 @@ def do_list_evidence(session: GlaiveSession) -> dict[str, Any]:
     Returns each evidence file's hash, original name, size, ingest time, and
     how many ingest runs have happened. This is the chain-of-custody view.
     """
-    items = []
-    # The store's manifest maps hash -> metadata
-    for sha, meta in session.store._manifest.items():
-        items.append({
-            "evidence_hash": sha,
-            "original_name": meta.get("original_name"),
-            "size_bytes": meta.get("size_bytes"),
-            "ingested_at": meta.get("ingested_at"),
-        })
+    items = session.store.list_all()
 
     # Sort by ingest time for a stable, chronological view
     items.sort(key=lambda x: x.get("ingested_at") or "")
