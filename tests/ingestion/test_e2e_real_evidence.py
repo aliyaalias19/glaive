@@ -24,24 +24,28 @@ REAL_EVTX = Path(__file__).resolve().parents[2] / "test_evidence" / "Defender.ev
 
 
 @pytest.fixture(scope="module")
-def populated_graph(tmp_path_factory) -> tuple[EvidenceGraph, EvidenceStore, str, dict]:
-    """Run the full pipeline ONCE per test module against the real EVTX file.
+def populated_graph(
+    tmp_path_factory, real_defender_events
+) -> tuple[EvidenceGraph, EvidenceStore, str, dict]:
+    """Run the orchestrator pipeline ONCE per test module against the real
+    Defender.evtx.
+
+    Consumes the session-scoped `real_defender_events` fixture from
+    conftest.py so the binary EVTX is parsed only once across the entire
+    test session.
 
     Returns:
         (graph, store, expected_hash, report) tuple for individual tests to inspect.
     """
-    if not REAL_EVTX.exists():
-        pytest.skip("Real Defender.evtx not present.")
-
-    # Fresh store + graph for the test
+    # Fresh store + graph for this module
     store_root = tmp_path_factory.mktemp("e2e_store")
     store = EvidenceStore(store_root)
     graph = EvidenceGraph()
     orch = Orchestrator(graph, store)
     parser = DefenderEvtxParser(store)
 
-    # Adapt: read 15,911 binary records -> dicts
-    events = list(iter_evtx_events(REAL_EVTX))
+    # Reuse the cached parse from conftest
+    events, _stats = real_defender_events
 
     # Drive the orchestrator through the full pipeline
     report = orch.run(parser, source_path=REAL_EVTX, parse_input=events)

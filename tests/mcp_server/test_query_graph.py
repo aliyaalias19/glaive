@@ -180,10 +180,9 @@ def _extract_payload(result):
 @pytest.mark.integration
 @pytest.mark.skipif(not REAL_EVTX.exists(), reason="Real Defender.evtx not present.")
 class TestQueryRealEvidence:
-    def test_real_trojan_query(self, session: GlaiveSession) -> None:
-        do_ingest_artifact(session, str(REAL_EVTX), "defender_evtx")
+    def test_real_trojan_query(self, populated_session: GlaiveSession) -> None:
         result = do_query_graph(
-            session,
+            populated_session,
             node_type="AntivirusDetection",
             filters=[{"field": "threat_name", "op": "contains", "value": "Trojan"}],
         )

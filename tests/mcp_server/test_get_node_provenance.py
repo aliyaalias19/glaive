@@ -159,12 +159,11 @@ def _extract_payload(result):
 @pytest.mark.integration
 @pytest.mark.skipif(not REAL_EVTX.exists(), reason="Real Defender.evtx not present.")
 class TestProvenanceRealEvidence:
-    def test_trace_real_finding_to_source(self, session: GlaiveSession) -> None:
-        do_ingest_artifact(session, str(REAL_EVTX), "defender_evtx")
-        q = do_query_graph(session, node_type="AntivirusDetection",
+    def test_trace_real_finding_to_source(self, populated_session: GlaiveSession) -> None:
+        q = do_query_graph(populated_session, node_type="AntivirusDetection",
                            filters=[{"field": "threat_name", "op": "contains", "value": "Trojan"}])
         key = q["nodes"][0]["canonical_key"]
-        prov = do_get_node_provenance(session, key)
+        prov = do_get_node_provenance(populated_session, key)
         assert prov["status"] == "ok"
         assert prov["source_evidence"]["original_name"] == "Defender.evtx"
         assert prov["source_evidence"]["size_bytes"] > 0

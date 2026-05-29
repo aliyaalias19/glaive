@@ -161,13 +161,12 @@ def _extract_payload(result):
 @pytest.mark.integration
 @pytest.mark.skipif(not REAL_EVTX.exists(), reason="Real Defender.evtx not present.")
 class TestCommitRealEvidence:
-    def test_commit_real_trojan_finding(self, session: GlaiveSession) -> None:
-        do_ingest_artifact(session, str(REAL_EVTX), "defender_evtx")
-        q = do_query_graph(session, node_type="AntivirusDetection",
+    def test_commit_real_trojan_finding(self, populated_session: GlaiveSession) -> None:
+        q = do_query_graph(populated_session, node_type="AntivirusDetection",
                            filters=[{"field": "threat_name", "op": "contains", "value": "Trojan"}])
         key = q["nodes"][0]["canonical_key"]
         result = do_commit_finding(
-            session, "Defender detected Trojan:Win32/Cloxer", [key], "suspected",
+            populated_session, "Defender detected Trojan:Win32/Cloxer", [key], "suspected",
         )
         assert result["committed"] is True
-        assert session.report.findings[0].claim.startswith("Defender detected")
+        assert populated_session.report.findings[0].claim.startswith("Defender detected")

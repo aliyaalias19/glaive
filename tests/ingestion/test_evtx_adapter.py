@@ -73,20 +73,6 @@ class TestCleanDefenderPath:
 # =============================================================================
 
 
-@pytest.fixture(scope="module")
-def real_defender_events() -> tuple[list[dict], EvtxReadStats]:
-    """Parse the real Defender.evtx ONCE per test module and cache.
-
-    Without this, each integration test re-parses 16 MB of binary EVTX
-    (~80s each). With this, the parse happens once and tests reuse results.
-    """
-    if not REAL_EVTX.exists():
-        pytest.skip("Real Defender.evtx not present (test_evidence/ is gitignored).")
-    stats = EvtxReadStats()
-    events = list(iter_evtx_events(REAL_EVTX, stats))
-    return events, stats
-
-
 @pytest.mark.integration
 @pytest.mark.skipif(
     not REAL_EVTX.exists(),

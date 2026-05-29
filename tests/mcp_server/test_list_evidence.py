@@ -79,9 +79,8 @@ def _extract_payload(result):
 @pytest.mark.integration
 @pytest.mark.skipif(not REAL_EVTX.exists(), reason="Real Defender.evtx not present.")
 class TestListRealEvidence:
-    def test_real_file_appears(self, session: GlaiveSession) -> None:
-        do_ingest_artifact(session, str(REAL_EVTX), "defender_evtx")
-        result = do_list_evidence(session)
+    def test_real_file_appears(self, populated_session: GlaiveSession) -> None:
+        result = do_list_evidence(populated_session)
         assert result["evidence_count"] == 1
         assert result["evidence"][0]["original_name"] == "Defender.evtx"
         assert result["ingest_runs"] == 1
