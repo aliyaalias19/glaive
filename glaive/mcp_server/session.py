@@ -24,9 +24,25 @@ class GlaiveSession:
     evidence store under ./analysis/evidence_store/ (Protocol SIFT convention, D7).
     """
 
-    def __init__(self, analysis_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        analysis_dir: Path | None = None,
+        evidence_root: Path | None = None,
+    ) -> None:
+        """
+        Args:
+            analysis_dir: Where the evidence store and reports live.
+                Defaults to ./analysis.
+            evidence_root: Optional allowlist for ingest paths. When set,
+                ingest_artifact rejects paths outside this directory
+                (after symlink resolution). When None, no path restriction
+                (default; matches Day-6 behavior).
+        """
         self.analysis_dir = Path(analysis_dir) if analysis_dir else Path("./analysis")
         self.evidence_store_dir = self.analysis_dir / "evidence_store"
+        self.evidence_root = (
+            Path(evidence_root).resolve() if evidence_root else None
+        )
 
         self.graph = EvidenceGraph()
         self.store = EvidenceStore(self.evidence_store_dir)

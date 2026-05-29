@@ -32,7 +32,7 @@ hallucination-prevention layer built on a typed evidence graph.
 | `graph-verification` skill (Protocol SIFT integration) | Done | — (markdown asset) |
 | Hunter agent + Claude Code config | Week 2 | —        |
 | Accuracy harness + ground-truth cases | Week 3 | —    |
-| Bypass test suite (5 attacks) | Week 3 | —            |
+| Bypass test suite (5 attacks)         | Done   | 21 passing     |
 | Demo video                  | Week 3 | —              |
 
 **Total: 327 tests passing, 18 integration tests opt-in (real malware data, ~7 min).**
@@ -85,9 +85,9 @@ GLAIVE adds **four things** to Protocol SIFT (see [Status](#status) for what's s
    tells Claude Code how to use the graph layer — drops in alongside the
    existing memory-analysis / plaso-timeline / etc. skills. *(Shipped.)*
 4. **A bypass test suite.** Five adversarial tests against GLAIVE's own
-   constraints (prompt injection via evidence content, tool output poisoning,
-   filesystem escape, etc.) with the architectural reason each one fails.
-   *(Week 3.)*
+   constraints (hallucinated keys, confidence inflation, prompt injection,
+   path traversal, resource exhaustion) with the architectural reason each
+   one fails. See [BYPASS_TESTS.md](BYPASS_TESTS.md). *(Shipped.)*
 
 GLAIVE does *not* replace Protocol SIFT. The base CLAUDE.md, the 5 existing
 skills, the case template, and the bash-driven SIFT tool invocations are all
@@ -171,14 +171,14 @@ ln -s "$(pwd)/docs/skills/graph-verification" ~/.claude/skills/graph-verificatio
 | `ARCHITECTURE.md`          | System design and Trust Model                                             |
 | `LIMITATIONS.md`           | What GLAIVE does **not** do                                               |
 | `evidence_samples/`        | Manifest pointing at public evidence datasets                             |
-| `verification/`            | Skeleton for the accuracy harness + bypass test suite (Week 2-3)          |
+| `verification/bypass_tests/` | 21 adversarial tests covering 5 attack classes (see `BYPASS_TESTS.md`)    |
+| `BYPASS_TESTS.md`          | Judge-facing narrative: 5 attacks, defenses, honest limitations           |
 
 ### Coming in Weeks 2-3
 
 | Path                  | Status                                                                   |
 |-----------------------|--------------------------------------------------------------------------|
 | `ACCURACY_REPORT.md`  | Filled by `verification/harness.py` against ground-truth cases (Week 3)  |
-| `BYPASS_TESTS.md`     | Five adversarial tests against the gate, each with architectural reason  |
 | `glaive/cli.py`       | The `glaive investigate` command-line driver                             |
 | Volatility integration | vol.py shell-out for memory dump ingestion (requires SRL evidence pack) |
 | Demo video            | 5-minute screencast against real evidence                                |

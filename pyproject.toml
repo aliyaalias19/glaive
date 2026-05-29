@@ -54,8 +54,9 @@ select = ["E", "F", "I", "B", "W", "UP"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests", "verification"]
 markers = [
     "integration: tests that hit real evidence files (slow). Run with: pytest -m integration",
+    "bypass: adversarial tests against the gate / MCP boundary. Run with: pytest -m bypass",
 ]
-addopts = "-m 'not integration'"
+addopts = "-m 'not integration and not bypass'"

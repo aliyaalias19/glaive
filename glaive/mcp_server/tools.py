@@ -41,7 +41,7 @@ def do_ingest_artifact(
             ),
         }
 
-    # Validate path (M7 — basic guard; full sandboxing is Week 2)
+    # Validate path (M7 + A4 — allowlist when session.evidence_root is set)
     resolved = Path(path).expanduser()
     if not resolved.exists():
         return {
@@ -55,6 +55,22 @@ def do_ingest_artifact(
             "error": "not_a_file",
             "message": f"Path is not a regular file: {path}",
         }
+    # A4 defense: if session.evidence_root is set, the resolved path
+    # (with symlinks followed) must be under it. resolve() handles
+    # ../ traversal and symlink escapes uniformly.
+    if session.evidence_root is not None:
+        real_path = resolved.resolve()
+        try:
+            real_path.relative_to(session.evidence_root)
+        except ValueError:
+            return {
+                "status": "error",
+                "error": "path_outside_allowlist",
+                "message": (
+                    f"Path resolves to {real_path}, which is outside the "
+                    f"session evidence_root ({session.evidence_root})."
+                ),
+            }
 
     # Dispatch by source_type
     if source_type == "defender_evtx":
