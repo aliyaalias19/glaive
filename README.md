@@ -29,6 +29,7 @@ hallucination-prevention layer built on a typed evidence graph.
 | MCP server (5 tools)        | Done   | 42 passing     |
 | Agent-loop integration test | Done   | 2 passing      |
 | Volatility binary execution | Week 2 | —              |
+| `graph-verification` skill (Protocol SIFT integration) | Done | — (markdown asset) |
 | Hunter agent + Claude Code config | Week 2 | —        |
 | Accuracy harness + ground-truth cases | Week 3 | —    |
 | Bypass test suite (5 attacks) | Week 3 | —            |
@@ -82,7 +83,7 @@ GLAIVE adds **four things** to Protocol SIFT (see [Status](#status) for what's s
    doesn't trace to a graph path. *(Shipped.)*
 3. **A `graph-verification` skill for Protocol SIFT.** A `SKILL.md` that
    tells Claude Code how to use the graph layer — drops in alongside the
-   existing memory-analysis / plaso-timeline / etc. skills. *(Week 2.)*
+   existing memory-analysis / plaso-timeline / etc. skills. *(Shipped.)*
 4. **A bypass test suite.** Five adversarial tests against GLAIVE's own
    constraints (prompt injection via evidence content, tool output poisoning,
    filesystem escape, etc.) with the architectural reason each one fails.
@@ -145,7 +146,13 @@ Wire the server into Claude Code by adding to `~/.claude/mcp.json`:
 }
 ```
 
-(Direct Claude-Code integration is finalized in Week 2.)
+Then install the `graph-verification` skill that teaches Claude Code how to use the MCP tools alongside Protocol SIFT's existing skills:
+
+```bash
+ln -s "$(pwd)/docs/skills/graph-verification" ~/.claude/skills/graph-verification
+```
+
+(The actual `python -m glaive.mcp_server` entry point is added in Week 2.)
 
 ## Repository layout
 
