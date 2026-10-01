@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from glaive.evidence.store import sniff_format
 from glaive.graph.base import Node
 
 from glaive.ingestion.defender import DefenderEvtxParser
@@ -75,6 +76,16 @@ def do_ingest_artifact(
                     f"session evidence_root ({session.evidence_root})."
                 ),
             }
+
+    # Format check (v0.2): v0.1 "ingested" any file, e.g. /etc/passwd, as a
+    # Defender EVTX and copied it into the evidence store with status "ok".
+    fmt = sniff_format(resolved)
+    if source_type == "defender_evtx" and fmt != "evtx":
+        return {
+            "status": "error",
+            "error": "format_mismatch",
+            "message": f"{path} is not an EVTX file (detected format: {fmt}).",
+        }
 
     # Dispatch by source_type
     if source_type == "defender_evtx":
