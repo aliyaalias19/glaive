@@ -104,7 +104,7 @@ class Orchestrator:
 
         # If parse_input is a list of dicts and we have an evidence_hash,
         # inject it into each dict (the parsers honor _evidence_hash override).
-        prepared_input = self._prepare_input(parse_input, evidence_hash, parser)
+        prepared_input = self._prepare_input(parse_input, evidence_hash, parser, source_path)
 
         # Run the parser
         result: ParseResult = parser.parse(prepared_input)
@@ -157,27 +157,35 @@ class Orchestrator:
         return report
 
     def _prepare_input(
-        self, parse_input: Any, evidence_hash: str | None, parser: Parser
+        self,
+        parse_input: Any,
+        evidence_hash: str | None,
+        parser: Parser,
+        source_path: Path | None = None,
     ) -> Any:
-        """Inject evidence_hash into per-record dicts where appropriate.
+        """Inject evidence_hash and derivation into per-record dicts.
 
-        Today the convention is: records with an "_evidence_hash" key override
-        the parser default. The orchestrator injects this if a source_path
-        was provided.
+        Records that already carry "_evidence_hash" / "_derivation" keep them.
+        The orchestrator injects the hash only if a source_path was provided.
         """
         if evidence_hash is None or parse_input is None:
             return parse_input
 
-        derivation = parser._derivation(Path(self.reports[-1].source_path) if self.reports else None)
+        # v0.1 built this from self.reports[-1].source_path (the PREVIOUS
+        # run's file) and crashed when that run had no source_path. The
+        # derivation now names the file actually being ingested.
+        derivation = parser._derivation(source_path)
+
+        def stamp(rec: dict) -> dict:
+            return {
+                **rec,
+                "_evidence_hash": rec.get("_evidence_hash", evidence_hash),
+                "_derivation": rec.get("_derivation", derivation),
+            }
 
         # For Defender-style parsers: list of dicts
         if isinstance(parse_input, list):
-            return [
-                {**rec, "_evidence_hash": rec.get("_evidence_hash", evidence_hash),
-                 "_derivation": rec.get("_derivation", parser._derivation())}
-                for rec in parse_input
-                if isinstance(rec, dict)
-            ]
+            return [stamp(rec) for rec in parse_input if isinstance(rec, dict)]
 
         # For Volatility-style parsers: dict of plugin -> list of dicts
         if isinstance(parse_input, dict):
@@ -186,12 +194,7 @@ class Orchestrator:
                 if not isinstance(records, list):
                     out[plugin] = records
                     continue
-                out[plugin] = [
-                    {**rec, "_evidence_hash": rec.get("_evidence_hash", evidence_hash),
-                     "_derivation": rec.get("_derivation", parser._derivation())}
-                    for rec in records
-                    if isinstance(rec, dict)
-                ]
+                out[plugin] = [stamp(rec) for rec in records if isinstance(rec, dict)]
             return out
 
         # Anything else: pass through

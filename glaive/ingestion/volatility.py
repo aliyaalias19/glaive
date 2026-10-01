@@ -15,13 +15,17 @@ Decisions:
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from glaive.graph.edges import Spawned
 from glaive.graph.nodes import Process
 from glaive.ingestion.base import Parser, ParseResult
+
+
+# Sort key for processes with no known start time
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 class VolatilityProcessParseResult(ParseResult):
@@ -158,9 +162,11 @@ class VolatilityProcessParser(Parser):
         if parent is None:
             return None
 
+        # Provenance: the relation's own hash, else the child's (both came from
+        # the same memory image). Never a placeholder hash like "000...0".
         return Spawned(
-            evidence_hash=relation.get("_evidence_hash", "0" * 64),
-            derivation=relation.get("_derivation", self._derivation()),
+            evidence_hash=relation.get("_evidence_hash") or child.evidence_hash,
+            derivation=relation.get("_derivation") or child.derivation,
             source_key=parent.canonical_key(),
             target_key=child.canonical_key(),
             timestamp=child_start_time,
@@ -187,9 +193,16 @@ class VolatilityProcessParser(Parser):
         if not candidates:
             return None
 
+        def sort_key(p: Process) -> tuple[int, datetime]:
+            # Known start times rank above unknown ones. Every datetime here is
+            # tz-aware UTC, so we never compare naive with aware (v0.1 crashed
+            # with TypeError when candidates mixed known and unknown times).
+            if p.start_time is None:
+                return (0, _EPOCH)
+            return (1, p.start_time)
+
         if child_start_time is None:
-            # Take the candidate with the latest known start_time (or only one)
-            return max(candidates, key=lambda p: (p.start_time or datetime.min.replace(tzinfo=child_start_time.tzinfo if child_start_time else None)) if p.start_time else datetime.min)
+            return max(candidates, key=sort_key)
 
         # Restrict to candidates that started before the child
         valid = [
@@ -200,10 +213,14 @@ class VolatilityProcessParser(Parser):
             return None
 
         # Among valid candidates, take the most recent
-        return max(valid, key=lambda p: p.start_time or datetime.min.replace(tzinfo=child_start_time.tzinfo))
+        return max(valid, key=sort_key)
 
     def _parse_iso_utc_or_none(self, ts_str: str | None) -> datetime | None:
-        """Parse ISO 8601 string to UTC datetime, or return None for None/empty input."""
+        """Parse ISO 8601 string to tz-aware UTC datetime, or None for None/empty.
+        Naive timestamps are assumed to be UTC."""
         if ts_str is None or ts_str == "":
             return None
-        return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)

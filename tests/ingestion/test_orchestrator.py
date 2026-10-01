@@ -124,10 +124,12 @@ class TestOrchestratorWithDefender:
         events[2]["time_created"] = "2023-01-25T15:02:00+00:00"
 
         report = orch.run(parser, parse_input=events)
-        assert report.nodes_added == 3
-        assert report.nodes_merged == 0
+        # No source file and no _evidence_hash means no provenance:
+        # the records are rejected, never given a placeholder hash.
+        assert report.nodes_added == 0
         assert report.evidence_hash is None  # no source_path provided
-        assert graph.node_count() == 3
+        assert report.parser_stats["skipped_missing_provenance"] == 3
+        assert graph.node_count() == 0
 
     def test_run_defender_with_source_path_hashes_and_stores(self, tmp_path: Path) -> None:
         """Orchestrator hashes the source file and injects the hash into events."""
@@ -165,6 +167,7 @@ class TestOrchestratorWithDefender:
             _defender_event(event_id=1000),       # NOT supported
             _defender_event(event_id=1000),       # NOT supported (dup)
         ]
+        events = [{**e, "_evidence_hash": VALID_HASH} for e in events]
         report = orch.run(parser, parse_input=events)
         assert report.nodes_added == 1
         # Parser stats captured
@@ -178,7 +181,7 @@ class TestOrchestratorWithDefender:
         orch = Orchestrator(graph, store)
         parser = DefenderEvtxParser(store)
 
-        events = [_defender_event()]
+        events = [{**_defender_event(), "_evidence_hash": VALID_HASH}]
         r1 = orch.run(parser, parse_input=events)
         r2 = orch.run(parser, parse_input=events)
 

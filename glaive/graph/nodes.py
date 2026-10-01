@@ -789,9 +789,19 @@ class AntivirusDetection(Node):
     node_type: ClassVar[str] = "AntivirusDetection"
 
     host_hostname: str = Field(..., description="Hostname of the host.")
-    event_id: int = Field(..., description="1116 / 1117 / 1118 / 1119 / 5001.")
-    threat_name: str = Field(..., description="e.g., 'Trojan:Win32/PowerRunner.A'.")
+    event_id: int = Field(..., description="1116 / 1117 / 1118 / 1119 / 5001 / 5007 / ...")
+    threat_name: str | None = Field(
+        None,
+        description="e.g., 'Trojan:Win32/PowerRunner.A'. None for tamper events such as "
+        "5001 (real-time protection disabled), which carry no threat.",
+    )
     detection_time: datetime = Field(..., description="EVTX timestamp (required for identity).")
+    event_description: str | None = Field(
+        None, description="Meaning of event_id, e.g. 'Real-time protection disabled'."
+    )
+    severity: str | None = Field(None, description="Defender severity: Low/Moderate/High/Severe.")
+    process_name: str | None = Field(None, description="Process that triggered the detection.")
+    detection_user: str | None = Field(None, description="User context of the detection.")
     action_taken: str | None = Field(
         None, description="'Quarantined' / 'Removed' / 'Allowed' / etc."
     )
@@ -815,5 +825,6 @@ class AntivirusDetection(Node):
 
         if self.action_taken is None and other.action_taken is not None:
             self.action_taken = other.action_taken
-        if self.file_path is None and other.file_path is not None:
-            self.file_path = other.file_path
+        for f in ("file_path", "event_description", "severity", "process_name", "detection_user"):
+            if getattr(self, f) is None and getattr(other, f) is not None:
+                setattr(self, f, getattr(other, f))
