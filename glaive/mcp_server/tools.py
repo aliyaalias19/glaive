@@ -9,8 +9,12 @@ receives back.
 """
 from __future__ import annotations
 
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from glaive.graph.base import Node
 
 from glaive.ingestion.defender import DefenderEvtxParser
 from glaive.ingestion.evtx_adapter import iter_evtx_events
@@ -115,11 +119,39 @@ def _ingest_defender_evtx(session: GlaiveSession, path: Path) -> dict[str, Any]:
 # query_graph
 # =============================================================================
 
-# Supported filter operations (Decision M8).
-_FILTER_OPS = {"eq", "contains", "gt", "lt", "exists"}
+# Supported filter operations (Decision M8, extended in v0.2).
+_FILTER_OPS = {"eq", "ne", "contains", "icontains", "gt", "gte", "lt", "lte", "exists", "in"}
 
-# Cap on results returned to the agent (Decision M9 — resource bound).
+# Cap on results returned to the agent (Decision M9 - resource bound).
 DEFAULT_QUERY_LIMIT = 100
+# Hard ceiling (v0.2). v0.1 had none: limit=99999999 was honoured.
+MAX_QUERY_LIMIT = 500
+
+# Matches strings that start like an ISO datetime: 2025-04-12T08:21 / 2025-04-12 08:21
+_ISO_DT = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+
+
+def _queryable_fields() -> set[str]:
+    """Public schema fields of every node type. Filters may only use these
+    (v0.1 let the agent probe internals such as __class__ or model_config)."""
+    out: set[str] = set()
+    stack: list[type] = [Node]
+    while stack:
+        cls = stack.pop()
+        for sub in cls.__subclasses__():
+            stack.append(sub)
+            out |= set(sub.model_fields)
+    return out
+
+
+def _coerce_filter_value(actual: Any, target: Any) -> Any:
+    """JSON has no datetime type, so time filters arrive as ISO strings.
+    Convert them so they can be compared with the node's real datetime
+    (v0.1 compared str with datetime, which silently never matched)."""
+    if isinstance(actual, datetime) and isinstance(target, str) and _ISO_DT.match(target):
+        dt = datetime.fromisoformat(target.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return target
 
 
 def _matches_filter(node: Any, flt: dict[str, Any]) -> bool:
@@ -127,7 +159,7 @@ def _matches_filter(node: Any, flt: dict[str, Any]) -> bool:
 
     A filter is {"field": str, "op": str, "value": Any}.
     Missing fields never match (except 'exists' with value False).
-    Type mismatches (e.g. gt on a string) never match — they don't raise.
+    Type mismatches (e.g. gt on a string) never match - they don't raise.
     """
     field = flt.get("field")
     op = flt.get("op")
@@ -136,63 +168,79 @@ def _matches_filter(node: Any, flt: dict[str, Any]) -> bool:
     if field is None or op not in _FILTER_OPS:
         return False
 
-    has_field = hasattr(node, field)
-    actual = getattr(node, field, None)
+    has_field = field in getattr(type(node), "model_fields", {})
+    actual = getattr(node, field, None) if has_field else None
 
     if op == "exists":
-        # value True -> field must be present and non-None; False -> absent/None
         present = has_field and actual is not None
         return present if target else not present
 
     if not has_field or actual is None:
         return False
 
-    if op == "eq":
-        return actual == target
-    if op == "contains":
-        try:
-            return target in actual
-        except TypeError:
-            return False
-    if op == "gt":
-        try:
-            return actual > target
-        except TypeError:
-            return False
-    if op == "lt":
-        try:
-            return actual < target
-        except TypeError:
-            return False
+    if op == "in":
+        return isinstance(target, list) and actual in target
 
+    target = _coerce_filter_value(actual, target)
+    try:
+        if op == "eq":
+            return actual == target
+        if op == "ne":
+            return actual != target
+        if op == "contains":
+            return target in actual
+        if op == "icontains":
+            return str(target).lower() in str(actual).lower()
+        if op == "gt":
+            return actual > target
+        if op == "gte":
+            return actual >= target
+        if op == "lt":
+            return actual < target
+        if op == "lte":
+            return actual <= target
+    except TypeError:
+        return False
     return False
+
+
+def _json_safe(val: Any) -> Any:
+    if isinstance(val, datetime):
+        return val.isoformat()
+    if isinstance(val, bytes):
+        return val.decode("utf-8", "replace")
+    if isinstance(val, tuple):
+        return [_json_safe(v) for v in val]
+    return val
+
+
+_SUMMARY_SKIP = {"evidence_hash", "derivation", "observed_at"}
 
 
 def _node_summary(node: Any) -> dict[str, Any]:
     """Compact, JSON-safe summary of a node for the agent.
 
-    Includes canonical_key (as a list, since JSON has no tuples), node_type,
-    evidence_hash, and a small set of commonly useful display fields if present.
+    v0.1 looked for fields named 'path' / 'normalized_path', which no node
+    has, so File results never showed their path. v0.2 includes every field
+    that has a value (long strings truncated) so the agent sees what the
+    graph actually knows.
     """
     raw_key = node.canonical_key()
-    # canonical_key may contain datetimes (identity tuples) -> make JSON-safe
-    key = [
-        (elem.isoformat() if hasattr(elem, "isoformat") else elem)
-        for elem in raw_key
-    ]
     summary: dict[str, Any] = {
-        "canonical_key": key,
+        "canonical_key": [_json_safe(e) for e in raw_key],
         "node_type": raw_key[0],
         "evidence_hash": getattr(node, "evidence_hash", None),
     }
-    # Opportunistically include common display fields
-    for field in ("name", "threat_name", "pid", "hostname", "host_hostname",
-                  "path", "normalized_path", "action_taken", "detection_time"):
-        if hasattr(node, field):
-            val = getattr(node, field)
-            if val is not None:
-                # datetimes -> isoformat for JSON
-                summary[field] = val.isoformat() if hasattr(val, "isoformat") else val
+    for field in type(node).model_fields:
+        if field in _SUMMARY_SKIP:
+            continue
+        val = getattr(node, field)
+        if val is None or val == [] or val == {}:
+            continue
+        val = _json_safe(val)
+        if isinstance(val, str) and len(val) > 300:
+            val = val[:300] + "..."
+        summary[field] = val
     return summary
 
 
@@ -207,14 +255,23 @@ def do_query_graph(
     Args:
         node_type: Optional node type to filter by (e.g. 'Process').
         filters: Optional list of {"field","op","value"} filters (AND-combined).
-        limit: Max nodes to return (default 100, resource bound).
+        limit: Max nodes to return (default 100, never more than 500).
 
     Returns a dict with matched node summaries and counts.
     """
     filters = filters or []
+    limit = max(1, min(int(limit), MAX_QUERY_LIMIT))
+    allowed = _queryable_fields()
 
-    # Validate filters up front — give the agent clear feedback
+    # Validate filters up front - give the agent clear feedback
     for flt in filters:
+        if not isinstance(flt, dict) or flt.get("field") not in allowed:
+            bad = flt.get("field") if isinstance(flt, dict) else flt
+            return {
+                "status": "error",
+                "error": "bad_filter_field",
+                "message": f"Filter field {bad!r} is not a node schema field.",
+            }
         if flt.get("op") not in _FILTER_OPS:
             return {
                 "status": "error",
@@ -250,33 +307,33 @@ def do_query_graph(
 # Key coercion (shared by tools that accept a canonical_key from the agent)
 # =============================================================================
 
-from datetime import datetime as _dt  # local alias to avoid top-of-file edits
-
 
 def _coerce_key_element(elem: Any) -> Any:
-    """Convert an ISO-8601 datetime string back to a datetime; else passthrough.
+    """Convert an ISO-8601 *datetime* string back to a datetime; else passthrough.
 
-    query_graph serializes datetime elements of a canonical_key to isoformat
-    strings for JSON. When the agent sends a key back, we must restore the
-    datetime so graph lookups match (Decision M10).
-
-    A real string field (e.g. a threat name) won't parse as ISO datetime and
-    is returned unchanged.
+    Only strings that look like a date AND a time are converted. v0.1 used
+    bare fromisoformat, which also turned a hostname like '20240101' into a
+    datetime and broke the lookup.
     """
-    if not isinstance(elem, str):
-        return elem
-    # Cheap pre-check: ISO datetimes start with a 4-digit year and contain 'T'
-    # or a date dash pattern. fromisoformat is the real validator.
-    try:
-        return _dt.fromisoformat(elem)
-    except ValueError:
-        return elem
+    if isinstance(elem, str) and _ISO_DT.match(elem):
+        try:
+            return datetime.fromisoformat(elem.replace("Z", "+00:00"))
+        except ValueError:
+            return elem
+    return elem
 
 
 def _coerce_key(raw_key: list[Any] | tuple) -> tuple:
-    """Coerce a canonical_key from the agent (a JSON list) back to a tuple
-    with datetime elements restored."""
+    """Coerce a canonical_key from the agent (a JSON list) back to a tuple."""
     return tuple(_coerce_key_element(e) for e in raw_key)
+
+
+def resolve_key(session: GlaiveSession, raw_key: list[Any] | tuple) -> tuple:
+    """Resolve an agent-supplied key: exact match first, then datetime-coerced."""
+    raw = tuple(raw_key)
+    if session.graph.has_node(raw):
+        return raw
+    return _coerce_key(raw_key)
 
 
 # =============================================================================
@@ -296,7 +353,7 @@ def do_get_node_provenance(
     store metadata (original filename, size), observed_by for multi-source
     nodes, and display fields. This is the audit-trail tool.
     """
-    key = _coerce_key(canonical_key)
+    key = resolve_key(session, canonical_key)
 
     if not session.graph.has_node(key):
         return {
@@ -381,7 +438,7 @@ def do_commit_finding(
 
     # Coerce each supporting key (string datetimes -> datetimes) so graph
     # lookups in the gate succeed (reuses Step 5 infrastructure).
-    coerced_keys = [_coerce_key(k) for k in supporting_node_keys]
+    coerced_keys = [resolve_key(session, k) for k in supporting_node_keys]
 
     decision = session.report.can_commit(
         claim=claim,
