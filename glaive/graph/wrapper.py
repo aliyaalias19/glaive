@@ -147,6 +147,33 @@ class EvidenceGraph:
                 continue
             yield edge
 
+    # ---- neighbourhood (used by the grounding check) -------------------------
+
+    def neighbors(self, key: tuple[Any, ...], depth: int = 1, max_nodes: int = 200) -> set[tuple]:
+        """The node plus every node within `depth` hops, ignoring edge direction."""
+        if not self._graph.has_node(key):
+            raise KeyError(f"No node with key {key}")
+        seen = {key}
+        frontier = [key]
+        for _ in range(max(0, depth)):
+            nxt = []
+            for k in frontier:
+                for n in list(self._graph.successors(k)) + list(self._graph.predecessors(k)):
+                    if n not in seen:
+                        seen.add(n)
+                        nxt.append(n)
+                        if len(seen) >= max_nodes:
+                            return seen
+            frontier = nxt
+        return seen
+
+    def subgraph(self, keys: set[tuple]) -> tuple[list[Node], list[Edge]]:
+        """The given nodes and the edges between them."""
+        sub = self._graph.subgraph(keys)
+        nodes = [a["data"] for _, a in sub.nodes(data=True)]
+        edges = [a["data"] for _, _, a in sub.edges(data=True)]
+        return nodes, edges
+
     # ---- sanity --------------------------------------------------------------
 
     def node_count(self) -> int:

@@ -410,6 +410,8 @@ def do_commit_finding(
         result["agent_confidence_hint"] = decision.agent_confidence_hint
     if decision.final_confidence is not None:
         result["final_confidence"] = decision.final_confidence
+    if decision.grounding is not None:
+        result["grounding"] = decision.grounding
     result["total_findings"] = len(session.report.findings)
 
     return result

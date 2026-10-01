@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from glaive.reporting.grounding import check_grounding
+
 if TYPE_CHECKING:
     from glaive.graph.wrapper import EvidenceGraph
 
@@ -31,7 +33,7 @@ ConfidenceLevel = Literal["confirmed", "suspected", "inferred", "disputed"]
 
 # Decision outcomes for can_commit().
 DecisionStatus = Literal["accepted", "rejected_missing_node", "rejected_empty_support",
-                          "downgraded_confidence"]
+                          "downgraded_confidence", "rejected_ungrounded_claim"]
 
 
 class CommitDecision(BaseModel):
@@ -50,6 +52,8 @@ class CommitDecision(BaseModel):
     # If confidence was downgraded: what we changed it to vs what the agent claimed
     agent_confidence_hint: ConfidenceLevel | None = None
     final_confidence: ConfidenceLevel | None = None
+    # Which entities in the claim were / were not found in the evidence
+    grounding: dict[str, Any] | None = None
 
 
 class Finding(BaseModel):
@@ -114,7 +118,23 @@ class FindingReport(BaseModel):
                 ),
             )
 
-        # Rule 3: derive confidence from graph evidence
+        # Rule 3: every concrete entity in the claim (IP, path, hash, threat
+        # name, ...) must appear in the cited nodes or their 1-hop neighbours.
+        grounding = check_grounding(
+            claim, graph, [tuple(k) for k in supporting_node_keys]
+        )
+        if not grounding.ok:
+            return CommitDecision(
+                status="rejected_ungrounded_claim",
+                reason=(
+                    "The claim names things that are not in the cited evidence: "
+                    f"{grounding.to_dict()['ungrounded']}. Cite the nodes that "
+                    "contain them, or remove them from the claim."
+                ),
+                grounding=grounding.to_dict(),
+            )
+
+        # Rule 4: derive confidence from graph evidence
         final_confidence = self._derive_confidence(
             supporting_node_keys, confidence_hint, graph
         )
@@ -135,14 +155,16 @@ class FindingReport(BaseModel):
                 finding=proposed,
                 agent_confidence_hint=confidence_hint,
                 final_confidence=final_confidence,
+                grounding=grounding.to_dict(),
             )
-
+        
         return CommitDecision(
             status="accepted",
             reason="All supporting nodes verified; confidence matches evidence.",
             finding=proposed,
             agent_confidence_hint=confidence_hint,
             final_confidence=final_confidence,
+            grounding=grounding.to_dict(),
         )
 
     def commit(self, finding: Finding) -> None:
