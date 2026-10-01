@@ -15,7 +15,10 @@ Tools are added incrementally (Steps 3-7). This file starts with none.
 """
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+try:  # mcp 1.x
+    from mcp.server.fastmcp import FastMCP
+except ImportError:  # mcp 2.x renamed FastMCP -> MCPServer
+    from mcp.server.mcpserver import MCPServer as FastMCP  # type: ignore[no-redef]
 
 from glaive.mcp_server.session import GlaiveSession
 from glaive.mcp_server import tools

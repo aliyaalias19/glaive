@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from glaive.mcp_server.session import GlaiveSession
+from glaive.mcp_server.compat import tool_payload
 from glaive.mcp_server.server import build_server
 from glaive.mcp_server.tools import do_ingest_artifact, do_list_evidence
 
@@ -67,13 +68,7 @@ class TestMcpLayer:
 
 
 def _extract_payload(result):
-    if isinstance(result, list) and result:
-        block = result[0]
-        if hasattr(block, "text"):
-            return json.loads(block.text)
-    if isinstance(result, dict):
-        return result
-    raise AssertionError(f"Unexpected shape: {type(result)}")
+    return tool_payload(result)
 
 
 @pytest.mark.integration

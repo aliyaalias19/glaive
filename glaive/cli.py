@@ -36,7 +36,7 @@ def investigate(
     """
     console.print(
         f"[yellow]investigate[/] is not yet implemented. "
-        f"Would investigate [bold]{evidence_dir}[/] → [bold]{output}[/]"
+        f"Would investigate [bold]{evidence_dir}[/] -> [bold]{output}[/]"
     )
     raise typer.Exit(code=2)
 
