@@ -1,4 +1,4 @@
-"""Step 7: .glaive case files and graph serialization."""
+""".glaive case files and graph serialization."""
 from __future__ import annotations
 
 import sqlite3
