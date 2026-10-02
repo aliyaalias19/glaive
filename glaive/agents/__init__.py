@@ -6,7 +6,8 @@ from glaive.agents.agents import (
     SkepticAgent,
     verify_cited_text,
 )
+from glaive.agents.runner import Investigation, InvestigationResult
 from glaive.agents.toolbox import AgentToolbox
 
-__all__ = ["AgentToolbox", "HunterAgent", "ReporterAgent", "RuleInvestigator", "SkepticAgent",
-           "verify_cited_text"]
+__all__ = ["AgentToolbox", "HunterAgent", "Investigation", "InvestigationResult",
+           "ReporterAgent", "RuleInvestigator", "SkepticAgent", "verify_cited_text"]
