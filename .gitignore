@@ -54,3 +54,6 @@ test_evidence/
 
 # Runtime investigation output (evidence store, reports)
 analysis/
+
+# The example config (no secrets) is meant to be shared
+!.env.example
