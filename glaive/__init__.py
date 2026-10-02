@@ -4,4 +4,4 @@ Extends Protocol SIFT with architectural hallucination prevention via a
 typed evidence graph.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -400,8 +400,12 @@ HASH_STUN = "deadbeef" * 8  # 64 hex chars
 HASH_OTHER = "c0ffee" * 10 + "abcd"  # 64 hex chars
 
 
-class TestFile:
-    """Schema section 2.3 — File node."""
+class TestFileIdentityAndMerge:
+    """Schema section 2.3 — File node.
+
+    (v0.2: renamed. A second `class TestFile` later in this module used to
+    shadow this one, so these 14 tests never ran.)
+    """
 
     def test_minimal_construction(self) -> None:
         f = File(

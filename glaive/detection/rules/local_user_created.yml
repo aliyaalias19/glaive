@@ -1,0 +1,19 @@
+title: Local User Account Created
+id: 3c6b17a3-ec91-5f2b-9f33-d9bc28b8490b
+status: experimental
+description: A new user account was created.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.persistence
+  - attack.t1136.001
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4720
+  condition: selection
+falsepositives:
+  - Normal account administration
+level: medium

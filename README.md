@@ -1,199 +1,183 @@
 # GLAIVE
-**Graph-Linked Adversarial Investigation & Verification Engine**
 
-> Protocol SIFT lets Claude Code run forensic tools and asks it nicely not to
-> hallucinate. GLAIVE makes hallucination *architecturally impossible* by
-> forcing every finding to correspond to a path in a typed evidence graph.
+**An AI forensic investigator that can only say what the evidence proves.**
+
+Point GLAIVE at Windows logs. It builds a typed evidence graph, runs
+detection rules, and lets AI agents investigate, but every finding must pass
+a verification gate before anyone sees it:
+
+- it must cite real graph nodes built from your evidence files;
+- every IP, path, hash, domain, account or threat name it mentions must
+  appear in that evidence;
+- its confidence is computed from how many independent sources corroborate
+  it, not from what the model claims;
+- a second agent (the Skeptic) tries to refute it, and high-severity
+  findings wait for a human to approve them.
+
+Each sentence in the report links back to the exact log record and the
+SHA-256 of the original file.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Platform: SIFT](https://img.shields.io/badge/Platform-SANS%20SIFT-blue.svg)](https://www.sans.org/tools/sift-workstation/)
-[![Extends: Protocol SIFT](https://img.shields.io/badge/Extends-Protocol%20SIFT-green.svg)](https://github.com/teamdfir/protocol-sift)
-
-GLAIVE is a submission to the **FIND EVIL!** hackathon (SANS Institute,
-Apr–Jun 2026). It extends Protocol SIFT — the SANS AI-orchestration POC
-that pairs Claude Code with the SIFT Workstation — with an architectural
-hallucination-prevention layer built on a typed evidence graph.
 
 ---
 
-## Status
-
-| Layer                       | Status | Tests          |
-|-----------------------------|--------|----------------|
-| Typed evidence graph        | Done   | 187 passing    |
-| Content-addressed evidence store | Done | 24 passing  |
-| Ingestion (Defender + Volatility) | Done | 35 passing |
-| EVTX binary adapter         | Done   | 15 passing     |
-| Orchestrator                | Done   | 11 passing     |
-| Finding report + gate       | Done   | 13 passing     |
-| MCP server (5 tools)        | Done   | 42 passing     |
-| Agent-loop integration test | Done   | 2 passing      |
-| Volatility binary execution | Week 2 | —              |
-| `graph-verification` skill (Protocol SIFT integration) | Done | — (markdown asset) |
-| Hunter agent + Claude Code config | Week 2 | —        |
-| Accuracy harness + ground-truth cases | Week 3 | —    |
-| Bypass test suite (5 attacks)         | Done   | 21 passing     |
-| Demo video                  | Week 3 | —              |
-
-**Total: 327 tests passing, 18 integration tests opt-in (real malware data, ~7 min).**
-
----
-
-## The five-minute demo
-
-[ DEMO VIDEO LINK — added before submission ]
-
-What the demo shows, against a real 16 MB Windows Defender event log (15,911 records, 10 detection events, 2 actual Trojan signatures):
-
-1. **Ingestion.** GLAIVE's MCP server receives `ingest_artifact("Defender.evtx", "defender_evtx")`. The file is SHA-256 hashed into a content-addressed store; 15,901 unsupported event types are filtered out; 10 supported detection events become typed `AntivirusDetection` nodes in the graph.
-
-2. **Hunt.** Claude Code calls `query_graph(node_type="AntivirusDetection", filters=[{"field": "threat_name", "op": "contains", "value": "Trojan"}])`. The graph returns real findings — `Trojan:Win32/Cloxer` detected at `08:21:44`, quarantined at `08:21:49`.
-
-3. **Audit.** Claude Code calls `get_node_provenance(canonical_key=...)`. The node traces back through the graph → evidence hash → source file. Every byte is recoverable.
-
-4. **The gate.** Claude Code calls `commit_finding(claim, supporting_node_keys=[real_key], confidence_hint="confirmed")`. The gate checks the graph evidence and *downgrades* to "inferred" — there's no corroborating edge yet, so "confirmed" isn't earned. The finding is committed, transparently downgraded.
-
-5. **The gate refuses bypass.** Claude Code attempts `commit_finding` with a fabricated `supporting_node_key` referencing a process that was never observed. The gate rejects with `decision: rejected_missing_node`. Not via prompting — by construction.
-
----
-
-## Why this wins
-
-| Protocol SIFT's stated rule | How GLAIVE enforces it |
-|---|---|
-| "No hallucinations" | Findings reference graph nodes; nodes are only created from validated tool output |
-| "Deterministic execution" | Tool outputs flow through Pydantic-validated MCP handlers, not raw stdout |
-| "Evidence integrity" | Content-addressed evidence store (SHA-256), read-only path enforcement |
-| "Verification" | `commit_finding` refuses any claim whose evidence_hash is not resolvable |
-
-Protocol SIFT writes these as prompt instructions. GLAIVE writes them as code.
-
----
-
-## What's GLAIVE's novel contribution?
-
-GLAIVE adds **four things** to Protocol SIFT (see [Status](#status) for what's shipped today):
-
-1. **A typed evidence graph** (Pydantic + NetworkX). Every forensic observation
-   becomes a typed node or edge with provenance. Reasoning happens over the
-   graph, not over LLM-summarized text. *(Shipped.)*
-2. **A graph-verification MCP layer.** A small server (5 tools, not 50) that
-   sits between Claude Code and the graph. The only way findings can be
-   committed is through `commit_finding`, which rejects any claim that
-   doesn't trace to a graph path. *(Shipped.)*
-3. **A `graph-verification` skill for Protocol SIFT.** A `SKILL.md` that
-   tells Claude Code how to use the graph layer — drops in alongside the
-   existing memory-analysis / plaso-timeline / etc. skills. *(Shipped.)*
-4. **A bypass test suite.** Five adversarial tests against GLAIVE's own
-   constraints (hallucinated keys, confidence inflation, prompt injection,
-   path traversal, resource exhaustion) with the architectural reason each
-   one fails. See [BYPASS_TESTS.md](BYPASS_TESTS.md). *(Shipped.)*
-
-GLAIVE does *not* replace Protocol SIFT. The base CLAUDE.md, the 5 existing
-skills, the case template, and the bash-driven SIFT tool invocations are all
-unchanged. GLAIVE plugs in.
-
----
-
-## Quick start
-
-> **Tested on:** SANS SIFT (WSL2 Ubuntu 22.04), Python 3.11
-> **Status:** Week 1 complete (ingestion + graph + MCP server). Agent-driver CLI and demo recording in Weeks 2-3.
+## Try it in one minute
 
 ```bash
 git clone https://github.com/aliyaalias19/glaive.git
 cd glaive
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+python -m venv .venv
+# Windows: .venv\Scripts\activate      macOS/Linux: source .venv/bin/activate
+pip install -e ".[dev]"          # on Linux, ".[dev,fast]" adds a ~1000x faster EVTX reader
+
+glaive demo --serve
 ```
 
-### Verify the build (~2 seconds)
+`glaive demo` generates "Operation Invoice", a realistic two-host intrusion
+(phishing document, encoded PowerShell, Defender disabled, Run-key
+persistence, C2 beacon, LSASS dump, brute force, malicious service, shadow
+copy deletion, log clearing, and a prompt injection planted for AI
+investigators). It investigates the case, scores the result against the
+answer key, writes `report.html`, and opens the web app.
+
+No API key is needed. Without a model GLAIVE runs in **rules-only mode** and
+still finds 10 of the 12 attack steps. Add a model to let the agents find the
+rest.
+
+## Investigate your own evidence
 
 ```bash
-pytest
-# Expected: 327 passed, 18 deselected
+glaive investigate C:\triage\host01.zip          # a file, folder or .zip
+glaive investigate ./kape-output --language zh   # 中文 report
+glaive serve cases/host01                        # review findings in the browser
 ```
 
-The 18 deselected tests are **integration tests** that run against a real binary EVTX file. To execute them, drop a real Windows Defender event log at `test_evidence/Defender.evtx` (instructions in [docs/EVIDENCE.md](docs/EVIDENCE.md)), then:
+Accepted today: Windows **EVTX** files (Security, System, Sysmon, PowerShell,
+Microsoft Defender) and **JSON / JSON-Lines** exports (EvtxECmd, Chainsaw,
+`evtx_dump`, or GLAIVE's own format). Files are recognised by content, not by
+name. Everything else is still hashed into the evidence store for chain of
+custody.
+
+## Use any AI model, or none
+
+Set one or more keys. GLAIVE uses them in order and falls back automatically
+when one fails (retries, circuit breaker, token budget).
+
+| Region | Providers |
+|---|---|
+| International | Claude (`ANTHROPIC_API_KEY`), GPT (`OPENAI_API_KEY`), Gemini (`GEMINI_API_KEY`), OpenRouter |
+| China | DeepSeek, Qwen (DashScope), Kimi (Moonshot), GLM (Zhipu), Doubao (Volcengine Ark), SiliconFlow |
+| Offline / self-hosted | Ollama (`OLLAMA_MODEL=qwen3:8b`), or any OpenAI-compatible server: vLLM, SGLang, LMDeploy, llama.cpp (`GLAIVE_BASE_URL`) |
 
 ```bash
-pytest -m integration
-# Expected: 18 passed in ~7 minutes (binary EVTX parsing is heavy)
+glaive models        # what is configured, and how to add more
 ```
 
-### Run the full agent-loop simulation
+See [.env.example](.env.example) for every setting. Default model names were
+checked against provider documentation in October 2026; override any of them
+with `GLAIVE_MODEL` or `<PROVIDER>_MODEL`.
 
-The single test that proves the architectural promise end-to-end:
-
-```bash
-pytest tests/mcp_server/test_agent_loop.py -m integration -v
-```
-
-This test simulates Claude Code calling all 5 MCP tools in sequence against real malware data, including a deliberate bypass attempt that the gate must reject. If this passes, every layer of GLAIVE — schema, graph, ingestion, MCP boundary, gate — works.
-
-### Use the MCP server with Claude Code
-
-Wire the server into Claude Code by adding to `~/.claude/mcp.json`:
+## Use it from Claude Code, Cursor, Dify or Cherry Studio (MCP)
 
 ```json
-{
-  "mcpServers": {
-    "glaive": {
-      "command": "python",
-      "args": ["-m", "glaive.mcp_server"]
-    }
-  }
-}
+{ "mcpServers": { "glaive": { "command": "glaive", "args": ["mcp", "--case", "cases/host01"] } } }
 ```
 
-Then install the `graph-verification` skill that teaches Claude Code how to use the MCP tools alongside Protocol SIFT's existing skills:
+Tools: `ingest_artifact`, `case_overview`, `list_alerts`, `query_graph`,
+`get_neighbors`, `get_timeline`, `get_node_provenance`, `commit_finding`
+(the gate), `list_evidence`, `save_case`.
+
+## Run it in Docker
 
 ```bash
-ln -s "$(pwd)/docs/skills/graph-verification" ~/.claude/skills/graph-verification
+docker build -t glaive .
+docker run -p 8765:8765 -v "$PWD/cases:/cases" -e GLAIVE_WEB_TOKEN=choose-a-secret glaive
+# open http://127.0.0.1:8765/?token=choose-a-secret
 ```
 
-(The actual `python -m glaive.mcp_server` entry point is added in Week 2.)
+The container runs as an unprivileged user and, because it listens on all
+interfaces, always requires the access token.
 
-## Repository layout
+## Security model
 
-### Present today
+- Evidence is copied into a content-addressed store, made read-only and
+  hashed (SHA-256) before it is parsed; `glaive verify` re-checks every file.
+- Everything read from evidence is treated as data. Text aimed at AI
+  investigators ("ignore previous instructions...") is detected in English
+  and Chinese, raised as an alert, and passed to models only inside randomly
+  tagged delimiters.
+- Archives are checked for path traversal, zip bombs and symlinks before
+  extraction.
+- The web app listens on 127.0.0.1 by default. Without a token it rejects
+  requests addressed to any other host name (DNS rebinding) and
+  state-changing requests from other websites (cross-site request forgery).
+  On any other address it requires `GLAIVE_WEB_TOKEN`. The page loads nothing
+  from third parties, so it works on isolated analysis machines.
+- 21 adversarial tests in `verification/bypass_tests` try to get false
+  findings past the gate; see [BYPASS_TESTS.md](BYPASS_TESTS.md).
 
-| Path                       | What's in it                                                              |
-|----------------------------|---------------------------------------------------------------------------|
-| `glaive/graph/`            | Pydantic schema: 10 node types, 12 edge types, NetworkX wrapper           |
-| `glaive/evidence/`         | Content-addressed evidence store (SHA-256 + manifest)                     |
-| `glaive/ingestion/`        | Parsers (Defender EVTX, Volatility) + EVTX binary adapter + orchestrator  |
-| `glaive/reporting/`        | `FindingReport` — the gate (confidence-downgrade enforcement)             |
-| `glaive/mcp_server/`       | MCP server (5 tools: ingest, query, provenance, commit, list)             |
-| `tests/`                   | 327 tests; 18 marked `integration` (run against real binary EVTX)         |
-| `docs/EVIDENCE_GRAPH_SCHEMA.md` | The full schema spec — 10 nodes, 12 edges, 5 principles               |
-| `docs/DECISIONS.md`        | 29 strategic and design decisions with rationale                          |
-| `ARCHITECTURE.md`          | System design and Trust Model                                             |
-| `LIMITATIONS.md`           | What GLAIVE does **not** do                                               |
-| `evidence_samples/`        | Manifest pointing at public evidence datasets                             |
-| `verification/bypass_tests/` | 21 adversarial tests covering 5 attack classes (see `BYPASS_TESTS.md`)    |
-| `BYPASS_TESTS.md`          | Judge-facing narrative: 5 attacks, defenses, honest limitations           |
+## How it works
 
-### Coming in Weeks 2-3
+```
+evidence (.evtx / .json / .zip)
+   |  hashed into a read-only, content-addressed store (SHA-256)
+   v
+parsers  ->  typed evidence graph  (processes, users, hosts, files, registry,
+   |         network endpoints, services, tasks, script blocks, alerts)
+   v
+detections: 27 built-in Sigma rules (+ any SigmaHQ folder) and correlations
+   |        (brute force -> logon, defender disabled -> attack, prompt injection)
+   v
+agents:  Rules triage (no AI) -> Hunter -> Skeptic -> Reporter
+   |        every claim goes through commit_finding (the gate)
+   v
+case.glaive (SQLite) + report.html + web app + MCP
+```
 
-| Path                  | Status                                                                   |
-|-----------------------|--------------------------------------------------------------------------|
-| `ACCURACY_REPORT.md`  | Filled by `verification/harness.py` against ground-truth cases (Week 3)  |
-| `glaive/cli.py`       | The `glaive investigate` command-line driver                             |
-| Volatility integration | vol.py shell-out for memory dump ingestion (requires SRL evidence pack) |
-| Demo video            | 5-minute screencast against real evidence                                |
+| Part | What it does |
+|---|---|
+| `glaive/graph/` | Pydantic node/edge types, merge rules, multi-source confidence |
+| `glaive/evidence/` | Content-addressed store; hash-while-copy; read-only; `verify()` |
+| `glaive/ingestion/` | EVTX (Rust fast path + python-evtx fallback), JSON/JSONL, Windows parser, folder/zip pipeline with zip-slip and zip-bomb protection |
+| `glaive/detection/` | Dependency-free Sigma engine (loads ~90% of SigmaHQ's Windows rules) and correlation rules |
+| `glaive/reporting/` | The gate: node existence, claim grounding, confidence derivation, analyst review; HTML report |
+| `glaive/llm/` | Provider adapters (OpenAI-compatible + Anthropic), router, environment config |
+| `glaive/agents/` | Toolbox, Hunter (plan + ReAct), Skeptic, Reporter (cited sentences only), runner |
+| `glaive/security/` | Prompt-injection detection (English and Chinese) and spotlighting of untrusted data |
+| `glaive/case/` | The portable `.glaive` case file |
+| `glaive/web/` | FastAPI app with a live event stream; single-page UI that works offline |
+| `glaive/eval/` | Scores an investigation against an answer key |
 
----
+## Measured, not claimed
 
-## Hackathon compliance
+| Check | Result |
+|---|---|
+| Test suite | 503 tests + 21 adversarial bypass tests, on Windows and Linux, Python 3.11 and 3.12, mcp 1.x and 2.x |
+| Real data | All 278 files of the public [EVTX-ATTACK-SAMPLES](https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES) set (37,364 events) ingest with no errors and no fabricated provenance (`pytest -m integration` with `GLAIVE_EVTX_SAMPLES` set) |
+| Speed | That set ingests, detects and links in about 3 seconds with the fast EVTX reader |
+| Demo case, rules only | Recall 10/12 attack steps, 13/14 findings match the answer key, 0 ungrounded statements ([ACCURACY_REPORT.md](ACCURACY_REPORT.md)) |
+| Sigma compatibility | 2,168 of 2,410 SigmaHQ Windows rules load; the rest use log sources or Sigma features GLAIVE does not support yet and are reported, never mis-evaluated |
 
-Built for the **FIND EVIL!** hackathon (SANS Institute, Apr–Jun 2026).
-This project is substantially new work created during the hackathon period.
-Pre-existing dependencies (Protocol SIFT, Volatility 3, Plaso, python-evtx,
-NetworkX, Pydantic) are unmodified open-source libraries. The graph schema,
-MCP verification layer, graph-verification skill, and bypass test suite are
-original contributions.
+## Honest limits
+
+- Windows logs only so far. Memory images (Volatility), disk images,
+  registry hives, Linux, macOS and cloud audit logs are on the roadmap.
+- The gate checks concrete entities (IPs, paths, hashes, names). A claim can
+  still overstate what the evidence means using ordinary words. The Skeptic
+  agent and human approval exist for that.
+- Process identity across logs uses (host, PID, start time to the second).
+  Very fast PID reuse within one second can merge two processes.
+- No attribution ("this was APT-X") and no legal conclusions.
+- The AI agents were tested with scripted models and HTTP-level mocks; their
+  real-world quality depends on the model you connect.
+
+Design notes and history: [ARCHITECTURE.md](ARCHITECTURE.md),
+[docs/DECISIONS.md](docs/DECISIONS.md), [BYPASS_TESTS.md](BYPASS_TESTS.md),
+[LIMITATIONS.md](LIMITATIONS.md), [CHANGELOG.md](CHANGELOG.md).
+
+GLAIVE began as a submission to the SANS **FIND EVIL!** hackathon (2026) as a
+verification layer for Protocol SIFT; it still works that way through MCP.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

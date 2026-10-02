@@ -1,0 +1,28 @@
+title: PowerShell Download Cradle
+id: da9ab2bd-7127-51bc-b886-105c7663b3f5
+status: experimental
+description: PowerShell code downloads content from the internet, often a second-stage payload.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.command_and_control
+  - attack.t1105
+  - attack.execution
+  - attack.t1059.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    CommandLine|contains:
+      - 'DownloadString('
+      - 'DownloadFile('
+      - 'DownloadData('
+      - 'Invoke-WebRequest'
+      - 'iwr http'
+      - 'Net.WebClient'
+      - 'Start-BitsTransfer'
+  condition: selection
+falsepositives:
+  - Legitimate software installers
+level: medium

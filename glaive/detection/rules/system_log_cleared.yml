@@ -1,0 +1,19 @@
+title: System Event Log Cleared
+id: 2897d390-687f-5dd9-8713-ac77701eb9cd
+status: experimental
+description: An event log was cleared (System event 104).
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.defense_evasion
+  - attack.t1070.001
+logsource:
+  product: windows
+  service: system
+detection:
+  selection:
+    EventID: 104
+  condition: selection
+falsepositives:
+  - Planned log rotation by administrators
+level: medium

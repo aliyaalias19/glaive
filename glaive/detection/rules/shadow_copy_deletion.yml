@@ -1,0 +1,33 @@
+title: Volume Shadow Copies Deleted
+id: 7b9d2091-a4ff-526f-b9ca-d46b140824b5
+status: experimental
+description: Backups (shadow copies) were deleted, a typical step right before ransomware encrypts files.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.impact
+  - attack.t1490
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    - CommandLine|contains|all:
+        - 'vssadmin'
+        - 'delete'
+        - 'shadows'
+    - CommandLine|contains|all:
+        - 'shadowcopy'
+        - 'delete'
+    - CommandLine|contains|all:
+        - 'wbadmin'
+        - 'delete'
+        - 'catalog'
+    - CommandLine|contains|all:
+        - 'bcdedit'
+        - 'recoveryenabled'
+        - 'no'
+  condition: selection
+falsepositives:
+  - Backup software maintenance
+level: critical

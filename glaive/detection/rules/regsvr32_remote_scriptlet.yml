@@ -1,0 +1,23 @@
+title: Regsvr32 Loads a Remote Scriptlet
+id: 78282179-41f9-567f-a288-c3fff9f5763f
+status: experimental
+description: regsvr32.exe was used to run a script from a URL (the 'Squiblydoo' technique).
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.defense_evasion
+  - attack.t1218.010
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: '\\regsvr32.exe'
+    CommandLine|contains:
+      - '/i:http'
+      - '-i:http'
+      - 'scrobj.dll'
+  condition: selection
+falsepositives:
+  - None known
+level: high

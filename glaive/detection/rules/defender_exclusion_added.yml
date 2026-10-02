@@ -1,0 +1,23 @@
+title: Microsoft Defender Exclusion Added via Command Line
+id: 40b6d25c-b8a7-54db-ad9b-164a1c74256e
+status: experimental
+description: A folder, file, process or extension was excluded from Defender scanning.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    CommandLine|contains:
+      - 'Add-MpPreference'
+      - 'Set-MpPreference'
+    CommandLine|contains|all:
+      - 'Exclusion'
+  condition: selection
+falsepositives:
+  - Software installers that add their own exclusions
+level: high
