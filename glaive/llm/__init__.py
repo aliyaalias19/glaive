@@ -5,6 +5,7 @@ from glaive.llm.providers import (
     Provider,
     ScriptedProvider,
 )
+from glaive.llm.router import Router
 from glaive.llm.types import (
     BudgetExceeded,
     LLMError,
@@ -17,5 +18,6 @@ from glaive.llm.types import (
 
 __all__ = [
     "AnthropicProvider", "BudgetExceeded", "LLMError", "LLMResponse", "Message",
-    "OpenAICompatProvider", "Provider", "ScriptedProvider", "ToolCall", "ToolSpec", "Usage",
+    "OpenAICompatProvider", "Provider", "Router", "ScriptedProvider", "ToolCall", "ToolSpec",
+    "Usage",
 ]
