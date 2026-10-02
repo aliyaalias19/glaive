@@ -21,12 +21,12 @@ def test_cli_version_runs() -> None:
     assert "glaive 0.1.0" in result.stdout
 
 
-def test_cli_investigate_is_stubbed() -> None:
-    """Until Week 2, investigate should explicitly say 'not yet implemented'."""
+def test_cli_investigate_missing_path_exits_2() -> None:
+    """A missing evidence path is a usage error (exit code 2), not a crash."""
     result = subprocess.run(
         [sys.executable, "-m", "glaive.cli", "investigate", "fake/path"],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 2
-    assert "not yet implemented" in result.stdout
+    assert "Evidence not found" in result.stdout
