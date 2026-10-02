@@ -51,7 +51,7 @@ jobs:
         run: docker build -t glaive .
       - name: Run and check the token is enforced
         run: |
-          docker run -d --name g -p 8765:8765 -e GLAIVE_WEB_TOKEN=ci-token glaive
+          docker run -d --name glaive-ci -p 8765:8765 -e GLAIVE_WEB_TOKEN=ci-token glaive
           for i in $(seq 1 30); do curl -fs -H "X-Glaive-Token: ci-token" http://127.0.0.1:8765/api/case && break; sleep 1; done
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/api/case)" = "401"
-          docker exec g glaive demo --out /tmp/demo --offline
+          docker exec glaive-ci glaive demo --out /tmp/demo --offline
