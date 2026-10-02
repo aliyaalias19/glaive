@@ -1,6 +1,6 @@
 [project]
 name = "glaive"
-version = "0.2.0"
+version = "0.2.1"
 readme = "README.md"
 description = "AI forensic investigator whose every finding is verified against the evidence. Works with any model (Claude, GPT, DeepSeek, Qwen, Kimi, GLM, local) or none."
 requires-python = ">=3.11"
