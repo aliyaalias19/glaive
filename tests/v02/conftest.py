@@ -5,6 +5,14 @@ tests can run as soon as that feature exists.
 """
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+
+if TYPE_CHECKING:
+    from glaive.mcp_server.session import GlaiveSession
+
 H = "a" * 64
 SYSMON = "Microsoft-Windows-Sysmon/Operational"
 
@@ -18,3 +26,22 @@ def ev(event_id: int, channel: str, data: dict, *, t: str = "2026-09-14T09:00:00
          "_uid": f"u{event_id}-{rid}-{t}"}
     e.update(extra)
     return e
+
+
+@pytest.fixture(scope="session")
+def demo_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    from glaive.demo.case import write_demo_case
+
+    d = tmp_path_factory.mktemp("demo") / "evidence"
+    write_demo_case(d)
+    return d
+
+
+@pytest.fixture
+def demo_session(tmp_path: Path, demo_dir: Path) -> GlaiveSession:
+    from glaive.ingestion.pipeline import ingest_path
+    from glaive.mcp_server.session import GlaiveSession
+
+    s = GlaiveSession(analysis_dir=tmp_path / "case", case_name="Demo")
+    ingest_path(s, demo_dir)
+    return s
