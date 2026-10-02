@@ -10,24 +10,22 @@ receives back.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from glaive.evidence.store import sniff_format
 from glaive.graph.base import Node
-
 from glaive.ingestion.defender import DefenderEvtxParser
 from glaive.ingestion.evtx_adapter import iter_evtx_events
 from glaive.mcp_server.session import GlaiveSession
 
-
 # Supported source types for ingest_artifact (Decision M5).
-SUPPORTED_SOURCE_TYPES = {"defender_evtx"}
+SUPPORTED_SOURCE_TYPES = {"auto", "defender_evtx"}
 
 
 def do_ingest_artifact(
-    session: GlaiveSession, path: str, source_type: str
+    session: GlaiveSession, path: str, source_type: str = "auto"
 ) -> dict[str, Any]:
     """Ingest one forensic artifact into the session's graph.
 
@@ -54,7 +52,7 @@ def do_ingest_artifact(
             "error": "file_not_found",
             "message": f"No file at path: {path}",
         }
-    if not resolved.is_file():
+    if not resolved.is_file() and source_type != "auto":
         return {
             "status": "error",
             "error": "not_a_file",
@@ -79,7 +77,7 @@ def do_ingest_artifact(
 
     # Format check (v0.2): v0.1 "ingested" any file, e.g. /etc/passwd, as a
     # Defender EVTX and copied it into the evidence store with status "ok".
-    fmt = sniff_format(resolved)
+    fmt = sniff_format(resolved) if resolved.is_file() else "directory"
     if source_type == "defender_evtx" and fmt != "evtx":
         return {
             "status": "error",
@@ -90,6 +88,20 @@ def do_ingest_artifact(
     # Dispatch by source_type
     if source_type == "defender_evtx":
         return _ingest_defender_evtx(session, resolved)
+    if source_type == "auto":
+        from glaive.ingestion.pipeline import ArchiveError, ingest_path
+
+        try:
+            summary = ingest_path(session, resolved)
+        except (ArchiveError, PermissionError, OSError) as e:
+            return {"status": "error", "error": "ingest_failed", "message": str(e)}
+        out = summary.to_dict()
+        out["files"] = [{"name": Path(f["path"]).name, "format": f["format"],
+                         "status": f["status"], "events": f["events"]}
+                        for f in out["files"]][:100]
+        return {"status": "ok", "source_type": "auto", **out,
+                "graph_totals": {"nodes": session.graph.node_count(),
+                                 "edges": session.graph.edge_count()}}
 
     # Unreachable (validated above), but keeps type-checkers happy
     return {
@@ -103,8 +115,13 @@ def _ingest_defender_evtx(session: GlaiveSession, path: Path) -> dict[str, Any]:
     """Wire adapter -> parser -> orchestrator for a Defender EVTX file (M6)."""
     parser = DefenderEvtxParser(session.store)
 
-    # Adapter: binary EVTX -> event dicts
-    events = list(iter_evtx_events(path))
+    # Adapter: binary EVTX -> event dicts. A damaged file is reported to the
+    # agent as a structured error, never as an exception.
+    try:
+        events = list(iter_evtx_events(path))
+    except Exception as e:  # noqa: BLE001 - any reader failure is a parse failure
+        return {"status": "error", "error": "parse_failed",
+                "message": f"Could not read {path.name} as EVTX: {e}"}
 
     # Orchestrator drives parse + graph integration + hashing
     report = session.orchestrator.run(
@@ -161,7 +178,7 @@ def _coerce_filter_value(actual: Any, target: Any) -> Any:
     (v0.1 compared str with datetime, which silently never matched)."""
     if isinstance(actual, datetime) and isinstance(target, str) and _ISO_DT.match(target):
         dt = datetime.fromisoformat(target.replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
     return target
 
 
@@ -423,6 +440,10 @@ def do_commit_finding(
     claim: str,
     supporting_node_keys: list[list[Any]],
     confidence_hint: str = "suspected",
+    severity: str = "medium",
+    mitre_techniques: list[str] | None = None,
+    rationale: str | None = None,
+    author: str = "agent",
 ) -> dict[str, Any]:
     """Commit a finding to the investigation report — through the gate.
 
@@ -449,6 +470,19 @@ def do_commit_finding(
 
     # Coerce each supporting key (string datetimes -> datetimes) so graph
     # lookups in the gate succeed (reuses Step 5 infrastructure).
+    if not isinstance(supporting_node_keys, list) or not all(
+        isinstance(k, (list, tuple)) for k in supporting_node_keys
+    ):
+        return {
+            "status": "error",
+            "error": "bad_supporting_keys",
+            "message": "supporting_node_keys must be a list of canonical_key lists.",
+        }
+    if severity not in {"info", "low", "medium", "high", "critical"}:
+        return {"status": "error", "error": "bad_severity",
+                "message": "severity must be one of info/low/medium/high/critical."}
+    techniques = [str(t).upper() for t in (mitre_techniques or [])
+                  if re.fullmatch(r"T\d{4}(\.\d{3})?", str(t).upper())]
     coerced_keys = [resolve_key(session, k) for k in supporting_node_keys]
 
     decision = session.report.can_commit(
@@ -456,6 +490,10 @@ def do_commit_finding(
         supporting_node_keys=coerced_keys,
         confidence_hint=confidence_hint,  # type: ignore[arg-type]
         graph=session.graph,
+        severity=severity,
+        mitre_techniques=techniques,
+        rationale=rationale,
+        author=author,
     )
 
     # Commit on accept or downgrade (both carry a valid Finding)
@@ -480,6 +518,8 @@ def do_commit_finding(
         result["final_confidence"] = decision.final_confidence
     if decision.grounding is not None:
         result["grounding"] = decision.grounding
+    if committed and decision.finding is not None:
+        result["finding_status"] = decision.finding.status
     result["total_findings"] = len(session.report.findings)
 
     return result
