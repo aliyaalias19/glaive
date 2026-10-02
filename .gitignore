@@ -57,3 +57,8 @@ analysis/
 
 # The example config (no secrets) is meant to be shared
 !.env.example
+
+
+# Default output folders of `glaive investigate` and `glaive demo`
+cases/
+glaive-demo/
