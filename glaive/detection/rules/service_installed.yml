@@ -1,0 +1,19 @@
+title: New Service Installed
+id: bf740540-9a2f-588d-9fd7-ef2908a94c60
+status: experimental
+description: A new Windows service was installed.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.persistence
+  - attack.t1543.003
+logsource:
+  product: windows
+  service: system
+detection:
+  selection:
+    EventID: 7045
+  condition: selection
+falsepositives:
+  - Software installation
+level: low

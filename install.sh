@@ -54,5 +54,5 @@ done
 echo ""
 echo "[GLAIVE] Installation complete."
 echo "  Activate the venv:    source .venv/bin/activate"
-echo "  Set your API key:     export ANTHROPIC_API_KEY=sk-ant-..."
-echo "  Run the demo:         glaive investigate evidence_samples/case1/"
+echo "  Optional AI model:    export ANTHROPIC_API_KEY=... (or DEEPSEEK_API_KEY, OLLAMA_MODEL; see glaive models)"
+echo "  Run the demo:         glaive demo --serve"

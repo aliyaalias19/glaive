@@ -1,0 +1,28 @@
+title: Service Installed From a Suspicious Location
+id: 7d66815c-f741-50ae-9640-cd836511b8d6
+status: experimental
+description: A new service runs a program from a user-writable folder or through a script host.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.persistence
+  - attack.t1543.003
+  - attack.privilege_escalation
+logsource:
+  product: windows
+  service: system
+detection:
+  selection:
+    EventID: 7045
+    ImagePath|contains:
+      - '\\AppData\\'
+      - '\\Temp\\'
+      - '\\Users\\Public\\'
+      - 'powershell'
+      - 'cmd.exe /c'
+      - '%COMSPEC%'
+      - '\\ProgramData\\'
+  condition: selection
+falsepositives:
+  - Poorly packaged legitimate software
+level: high

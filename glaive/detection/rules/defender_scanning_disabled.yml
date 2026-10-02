@@ -1,0 +1,21 @@
+title: Microsoft Defender Scanning Disabled
+id: 73dcff24-d573-5d63-8476-62ee8b746208
+status: experimental
+description: Malware or virus scanning was disabled in Microsoft Defender.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  product: windows
+  service: windefend
+detection:
+  selection:
+    EventID:
+      - 5010
+      - 5012
+  condition: selection
+falsepositives:
+  - Administrator troubleshooting
+level: high

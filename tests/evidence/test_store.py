@@ -152,7 +152,7 @@ class TestManifestPersistence:
 
         manifest = root / "manifest.json"
         assert manifest.exists()
-        data = json.loads(manifest.read_text())
+        data = json.loads(manifest.read_text(encoding="utf-8"))
         assert KNOWN_SHA256 in data
 
     def test_manifest_survives_recreating_store(self, tmp_path: Path) -> None:
