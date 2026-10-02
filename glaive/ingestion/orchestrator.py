@@ -18,7 +18,7 @@ Usage:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -96,7 +96,7 @@ class Orchestrator:
         Returns:
             IngestReport with stats from this run.
         """
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
 
         evidence_hash: str | None = None
         if source_path is not None:
@@ -108,8 +108,25 @@ class Orchestrator:
 
         # Run the parser
         result: ParseResult = parser.parse(prepared_input)
+        return self.integrate(type(parser).__name__, result, source_path=source_path,
+                              evidence_hash=evidence_hash, started=started)
 
-        # Integrate nodes
+    def integrate(
+        self,
+        parser_name: str,
+        result: ParseResult,
+        *,
+        source_path: Path | str | None = None,
+        evidence_hash: str | None = None,
+        started: datetime | None = None,
+    ) -> IngestReport:
+        """Add an already-parsed result to the graph and record an IngestReport.
+
+        Used by run(), and directly by the multi-file pipeline, which parses
+        events from many files in one pass so cross-file processes merge.
+        """
+        started = started or datetime.now(UTC)
+
         nodes_added = 0
         nodes_merged = 0
         for node in result.nodes:
@@ -120,13 +137,11 @@ class Orchestrator:
             else:
                 nodes_added += 1
 
-        # Integrate edges
         edges_added = 0
         edges_merged = 0
+        orphan_edges = 0
         for edge in result.edges:
-            existing = self.graph._graph.has_edge(
-                edge.source_key, edge.target_key, key=edge.canonical_key()
-            )
+            existing = self.graph.has_edge_key(edge)
             try:
                 self.graph.add_edge(edge)
                 if existing:
@@ -134,15 +149,15 @@ class Orchestrator:
                 else:
                     edges_added += 1
             except KeyError:
-                # endpoint not in graph; skip this edge
-                # (parsers should not produce orphan edges, but be defensive)
-                pass
+                # Endpoint not in graph. Counted (v0.1 dropped these silently).
+                orphan_edges += 1
 
-        # Extract parser-specific stats from result if available (e.g., DefenderParseResult)
         parser_stats = self._extract_parser_stats(result)
+        if orphan_edges:
+            parser_stats["orphan_edges_skipped"] = orphan_edges
 
         report = IngestReport(
-            parser_name=type(parser).__name__,
+            parser_name=parser_name,
             source_path=str(source_path) if source_path else None,
             evidence_hash=evidence_hash,
             nodes_added=nodes_added,
@@ -151,7 +166,7 @@ class Orchestrator:
             edges_merged=edges_merged,
             parser_stats=parser_stats,
             started_at=started,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self.reports.append(report)
         return report
@@ -210,7 +225,7 @@ class Orchestrator:
         # Get the model_fields of the ParseResult subclass minus the base fields
         base_fields = set(ParseResult.model_fields.keys())
         all_fields = set(type(result).model_fields.keys())
-        extra_fields = all_fields - base_fields
+        extra_fields = all_fields - base_fields - {"event_entities"}
         return {name: getattr(result, name) for name in extra_fields}
 
     def summary(self) -> str:
