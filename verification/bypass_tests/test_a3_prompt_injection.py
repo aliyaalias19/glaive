@@ -203,7 +203,7 @@ class TestA3PromptInjection:
         for d in suspect_dirs:
             for py_file in d.rglob("*.py"):
                 try:
-                    tree = ast.parse(py_file.read_text())
+                    tree = ast.parse(py_file.read_text(encoding="utf-8"))
                 except SyntaxError:
                     continue
                 for node in ast.walk(tree):
