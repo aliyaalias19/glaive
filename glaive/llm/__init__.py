@@ -1,4 +1,5 @@
 """Model-agnostic LLM layer: provider adapters, router, environment config."""
+from glaive.llm.catalog import PRESETS, build_provider, detect_providers, router_from_env
 from glaive.llm.providers import (
     AnthropicProvider,
     OpenAICompatProvider,
@@ -17,7 +18,7 @@ from glaive.llm.types import (
 )
 
 __all__ = [
-    "AnthropicProvider", "BudgetExceeded", "LLMError", "LLMResponse", "Message",
+    "PRESETS", "AnthropicProvider", "BudgetExceeded", "LLMError", "LLMResponse", "Message",
     "OpenAICompatProvider", "Provider", "Router", "ScriptedProvider", "ToolCall", "ToolSpec",
-    "Usage",
+    "Usage", "build_provider", "detect_providers", "router_from_env",
 ]
