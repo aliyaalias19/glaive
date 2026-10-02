@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+venv
+cases
+analysis
+glaive-demo
+test_evidence
+evidence_samples
+tests
+verification
+docs
+**/__pycache__
+.env
