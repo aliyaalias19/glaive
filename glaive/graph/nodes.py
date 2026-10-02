@@ -344,141 +344,6 @@ class Process(Node):
     """A running or formerly-running process on a host.
 
     Schema reference: section 2.2.
-    Identity: (host_hostname, pid, start_time) — three-tuple.
-
-    Why not include image_path in identity? A hollowed process keeps its
-    original image_path but executes different code. We want that to be one
-    process node, not two. (image_path_is_anomalous lives as a query, not a
-    stored property — see D10.)
-
-    Why include start_time? PIDs are recycled. Two processes with the same PID
-    at different times are different processes; start_time disambiguates.
-    When start_time is None (tool didn't provide it), nodes with the same
-    (host, pid, None) tuple merge — we accept this fuzziness over noise.
-    """
-
-    node_type: ClassVar[str] = "Process"
-
-    host_hostname: str = Field(..., description="Hostname of the host this process ran on.")
-    pid: int = Field(..., ge=0, description="Process ID.")
-    name: str = Field(..., description="Process name, e.g., 'STUN.exe'.")
-
-    # Optional but commonly populated
-    image_path: str | None = Field(None, description="Full path to backing binary; None if hollowed/injected.")
-    command_line: str | None = Field(None, description="Full command line.")
-    parent_pid: int | None = Field(None, ge=0)
-    start_time: datetime | None = Field(None, description="EPROCESS start time. Part of identity when present.")
-    exit_time: datetime | None = Field(None)
-    sha256: str | None = Field(None, description="SHA-256 of image_path file.")
-
-    # Multi-source observation tracking (Schema 4.2)
-    observed_by: list[str] = Field(
-        default_factory=list,
-        description="Tools/plugins that saw this process: 'psscan', 'pslist', 'pstree', 'evtx_4688', etc.",
-    )
-
-    # Disagreement tracking (Schema 5.2)
-    disagreements: dict[str, list] = Field(
-        default_factory=dict,
-        description="Map of field name -> list of conflicting observed values across tools.",
-    )
-
-    def canonical_key(self) -> tuple[Any, ...]:
-        """Identity: (host, pid, start_time). start_time can be None."""
-        return ("Process", self.host_hostname, self.pid, self.start_time)
-
-    def merge_into(self, other: "Node") -> None:
-        """Merge another observation of the same process.
-
-        Schema section 5.2 merge rules:
-          - Null fields filled from other
-          - observed_by union (order-preserving dedup)
-          - exit_time: take the latest known
-          - Non-identity conflicts -> record in disagreements; do not pick a winner
-          - parent_pid conflicts go into disagreements (real cases of tool disagreement)
-        """
-        if not isinstance(other, Process):
-            raise TypeError(f"Cannot merge {type(other).__name__} into Process")
-
-        # Fill simple nullable scalars (no conflict logic needed when one is None)
-        if self.image_path is None and other.image_path is not None:
-            self.image_path = other.image_path
-        elif (
-            self.image_path is not None
-            and other.image_path is not None
-            and self.image_path != other.image_path
-        ):
-            self._record_disagreement("image_path", self.image_path, other.image_path)
-
-        if self.command_line is None and other.command_line is not None:
-            self.command_line = other.command_line
-        elif (
-            self.command_line is not None
-            and other.command_line is not None
-            and self.command_line != other.command_line
-        ):
-            self._record_disagreement("command_line", self.command_line, other.command_line)
-
-        if self.parent_pid is None and other.parent_pid is not None:
-            self.parent_pid = other.parent_pid
-        elif (
-            self.parent_pid is not None
-            and other.parent_pid is not None
-            and self.parent_pid != other.parent_pid
-        ):
-            self._record_disagreement("parent_pid", self.parent_pid, other.parent_pid)
-
-        if self.sha256 is None and other.sha256 is not None:
-            self.sha256 = other.sha256
-        elif (
-            self.sha256 is not None
-            and other.sha256 is not None
-            and self.sha256 != other.sha256
-        ):
-            # Hash conflict on same (host, pid, start_time): the binary on disk changed
-            # under us. Record disagreement but DON'T raise like File does — Process
-            # identity is independent of binary content.
-            self._record_disagreement("sha256", self.sha256, other.sha256)
-
-        # exit_time: take latest known
-        if self.exit_time is None and other.exit_time is not None:
-            self.exit_time = other.exit_time
-        elif (
-            self.exit_time is not None
-            and other.exit_time is not None
-            and other.exit_time > self.exit_time
-        ):
-            self.exit_time = other.exit_time
-
-        # observed_by: union with order preservation
-        for src in other.observed_by:
-            if src not in self.observed_by:
-                self.observed_by.append(src)
-
-        # disagreements: merge dicts, unioning lists
-        for field, values in other.disagreements.items():
-            existing = self.disagreements.setdefault(field, [])
-            for v in values:
-                if v not in existing:
-                    existing.append(v)
-
-    def _record_disagreement(self, field: str, mine: Any, theirs: Any) -> None:
-        """Record both values when self and other disagree on a non-identity field.
-
-        Schema section 5.2 — we do not pick a winner. Both values are retained
-        so findings referencing this field can carry confidence='disputed'.
-        """
-        bucket = self.disagreements.setdefault(field, [])
-        if mine not in bucket:
-            bucket.append(mine)
-        if theirs not in bucket:
-            bucket.append(theirs)
-
-
-class Process(Node):
-    """A running or formerly-running process on a host.
-
-    Schema reference: section 2.2.
     Identity: (host_hostname, pid, start_time).
 
     image_path is intentionally NOT in identity — supports hollowing detection
@@ -547,9 +412,14 @@ class Process(Node):
                 # Conflict — record both values, don't pick a winner
                 self._record_disagreement(field, theirs, other_source)
 
-        # name is required; if they differ it's a real disagreement too
+        # name is required; if they differ it's a real disagreement too.
+        # Placeholder names ("pid_1234", used when only the PID was known)
+        # are replaced by a real name, not treated as a disagreement.
         if self.name != other.name:
-            self._record_disagreement("name", other.name, other_source)
+            if self.name.startswith("pid_") and not other.name.startswith("pid_"):
+                self.name = other.name
+            elif not other.name.startswith("pid_"):
+                self._record_disagreement("name", other.name, other_source)
 
         # exit_time: take latest known
         if self.exit_time is None and other.exit_time is not None:
@@ -789,9 +659,19 @@ class AntivirusDetection(Node):
     node_type: ClassVar[str] = "AntivirusDetection"
 
     host_hostname: str = Field(..., description="Hostname of the host.")
-    event_id: int = Field(..., description="1116 / 1117 / 1118 / 1119 / 5001.")
-    threat_name: str = Field(..., description="e.g., 'Trojan:Win32/PowerRunner.A'.")
+    event_id: int = Field(..., description="1116 / 1117 / 1118 / 1119 / 5001 / 5007 / ...")
+    threat_name: str | None = Field(
+        None,
+        description="e.g., 'Trojan:Win32/PowerRunner.A'. None for tamper events such as "
+        "5001 (real-time protection disabled), which carry no threat.",
+    )
     detection_time: datetime = Field(..., description="EVTX timestamp (required for identity).")
+    event_description: str | None = Field(
+        None, description="Meaning of event_id, e.g. 'Real-time protection disabled'."
+    )
+    severity: str | None = Field(None, description="Defender severity: Low/Moderate/High/Severe.")
+    process_name: str | None = Field(None, description="Process that triggered the detection.")
+    detection_user: str | None = Field(None, description="User context of the detection.")
     action_taken: str | None = Field(
         None, description="'Quarantined' / 'Removed' / 'Allowed' / etc."
     )
@@ -815,5 +695,85 @@ class AntivirusDetection(Node):
 
         if self.action_taken is None and other.action_taken is not None:
             self.action_taken = other.action_taken
-        if self.file_path is None and other.file_path is not None:
-            self.file_path = other.file_path
+        for f in ("file_path", "event_description", "severity", "process_name", "detection_user"):
+            if getattr(self, f) is None and getattr(other, f) is not None:
+                setattr(self, f, getattr(other, f))
+
+
+
+class Alert(Node):
+    """A detection-rule hit (Sigma rule or GLAIVE correlation) on one event.
+
+    Identity: (host, rule_id, detection_time, event_record_id).
+    Alerts are produced deterministically by the rule engine, never by an LLM,
+    so they are safe to cite as evidence.
+    """
+
+    node_type: ClassVar[str] = "Alert"
+
+    host_hostname: str = Field(..., description="Host the triggering event came from.")
+    rule_id: str = Field(..., description="Sigma rule id or glaive correlation id.")
+    title: str = Field(..., description="Rule title.")
+    level: str = Field("medium", description="informational / low / medium / high / critical.")
+    detection_time: datetime = Field(..., description="Timestamp of the triggering event.")
+    description: str | None = None
+    mitre_techniques: list[str] = Field(default_factory=list, description="e.g. ['T1059.001'].")
+    event_id: int | None = None
+    event_record_id: int | None = Field(None, description="EVTX EventRecordID, for traceability.")
+    channel: str | None = None
+    matched_fields: dict[str, str] = Field(
+        default_factory=dict, description="Event fields relevant to the match (truncated)."
+    )
+    source: str = Field("sigma", description="'sigma' or 'correlation'.")
+
+    def canonical_key(self) -> tuple[Any, ...]:
+        return ("Alert", self.host_hostname, self.rule_id, self.detection_time,
+                self.event_record_id)
+
+    def merge_into(self, other: Node) -> None:
+        if not isinstance(other, Alert):
+            raise TypeError(f"Cannot merge {type(other).__name__} into Alert")
+        for k, v in other.matched_fields.items():
+            self.matched_fields.setdefault(k, v)
+
+
+class ScriptBlock(Node):
+    """A PowerShell script block (event 4104).
+
+    Identity: (host, script_block_id). Long scripts arrive split across
+    several events; they merge into one node.
+    """
+
+    node_type: ClassVar[str] = "ScriptBlock"
+
+    host_hostname: str
+    script_block_id: str
+    text: str = Field("", description="Script text (possibly truncated).")
+    path: str | None = None
+    first_seen: datetime | None = None
+
+    def canonical_key(self) -> tuple[Any, ...]:
+        return ("ScriptBlock", self.host_hostname, self.script_block_id)
+
+    def merge_into(self, other: Node) -> None:
+        if not isinstance(other, ScriptBlock):
+            raise TypeError(f"Cannot merge {type(other).__name__} into ScriptBlock")
+        if other.text and other.text not in self.text:
+            self.text = (self.text + "\n" + other.text)[:20000]
+        if self.path is None:
+            self.path = other.path
+        if other.first_seen and (self.first_seen is None or other.first_seen < self.first_seen):
+            self.first_seen = other.first_seen
+
+
+def _all_subclasses(cls: type) -> list[type]:
+    out: list[type] = []
+    for sub in cls.__subclasses__():
+        out.append(sub)
+        out.extend(_all_subclasses(sub))
+    return out
+
+
+def node_registry() -> dict[str, type[Node]]:
+    """Map node_type -> concrete Node class (used to load saved cases)."""
+    return {c.node_type: c for c in _all_subclasses(Node) if getattr(c, "node_type", "")}

@@ -16,6 +16,7 @@ import pytest
 from glaive.graph.edges import Spawned
 from glaive.graph.nodes import AntivirusDetection, Process
 from glaive.mcp_server.session import GlaiveSession
+from glaive.mcp_server.compat import tool_payload
 from glaive.mcp_server.server import build_server
 from glaive.mcp_server.tools import do_commit_finding, do_ingest_artifact, do_query_graph
 
@@ -149,13 +150,7 @@ class TestMcpLayer:
 
 
 def _extract_payload(result):
-    if isinstance(result, list) and result:
-        block = result[0]
-        if hasattr(block, "text"):
-            return json.loads(block.text)
-    if isinstance(result, dict):
-        return result
-    raise AssertionError(f"Unexpected shape: {type(result)}")
+    return tool_payload(result)
 
 
 @pytest.mark.integration

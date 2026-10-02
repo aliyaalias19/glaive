@@ -1,0 +1,25 @@
+title: PowerShell Script Block With Download Cradle
+id: dfc66f0a-e9d1-546b-b11d-24a1747630ac
+status: experimental
+description: A logged PowerShell script block downloads content from the internet.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.command_and_control
+  - attack.t1105
+  - attack.execution
+  - attack.t1059.001
+logsource:
+  category: ps_script
+  product: windows
+detection:
+  selection:
+    ScriptBlockText|contains:
+      - 'DownloadString('
+      - 'DownloadFile('
+      - 'Net.WebClient'
+      - 'Invoke-WebRequest'
+  condition: selection
+falsepositives:
+  - Legitimate administration scripts
+level: medium

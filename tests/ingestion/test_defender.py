@@ -178,7 +178,7 @@ class TestBinaryEvtxNotYetSupported:
         """Passing a Path (binary EVTX) raises — Day 5 will implement this."""
         store = EvidenceStore(tmp_path / "store")
         parser = DefenderEvtxParser(store)
-        with pytest.raises(NotImplementedError, match="Day 5"):
+        with pytest.raises(NotImplementedError, match="iter_evtx_events"):
             parser.parse(Path("/fake/Defender.evtx"))
 
     def test_string_path_input_also_raises(self, tmp_path: Path) -> None:
@@ -193,4 +193,5 @@ class TestBinaryEvtxNotYetSupported:
 
 def test_supported_event_ids_match_schema() -> None:
     """The constant matches schema section 2.10 — guards against schema drift."""
-    assert SUPPORTED_EVENT_IDS == {1116, 1117, 1118, 1119, 5001}
+    # The original five must stay supported; v0.2 adds scan and tamper events.
+    assert {1116, 1117, 1118, 1119, 5001} <= SUPPORTED_EVENT_IDS

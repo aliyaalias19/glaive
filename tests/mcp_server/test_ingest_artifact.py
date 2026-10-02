@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from glaive.mcp_server.session import GlaiveSession
+from glaive.mcp_server.compat import tool_payload
 from glaive.mcp_server.server import build_server
 from glaive.mcp_server.tools import do_ingest_artifact
 
@@ -83,21 +84,7 @@ class TestMcpLayer:
 
 
 def _extract_payload(result):
-    """FastMCP (mcp 1.27) call_tool returns a list of content blocks.
-
-    For our dict-returning tools, the dict is JSON-serialized into a single
-    TextContent block. We parse it back to a dict.
-    """
-    import json
-
-    if isinstance(result, list) and result:
-        block = result[0]
-        # TextContent has a .text attribute holding the JSON string
-        if hasattr(block, "text"):
-            return json.loads(block.text)
-    if isinstance(result, dict):
-        return result
-    raise AssertionError(f"Unexpected call_tool return shape: {type(result)}")
+    return tool_payload(result)
 
 
 # ---- Integration: real evidence through the helper -------------------------

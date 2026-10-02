@@ -1,29 +1,53 @@
-"""Parser for Windows Defender EVTX events.
+"""Parser for Windows Defender (Microsoft-Windows-Windows Defender/Operational) events.
 
-For Day 4 (P2 decision): accepts pre-parsed event dicts. Day 5 will add a
-thin binary EVTX -> dict layer using python-evtx.
+Accepts event dicts as produced by glaive.ingestion.evtx_adapter.
 
-Produces AntivirusDetection nodes for events in the supported set:
-  - 1116 (malware detected)
-  - 1117 (action taken)
-  - 1118 (remediation started)
-  - 1119 (remediation succeeded)
-  - 5001 (real-time protection disabled)
+Produces AntivirusDetection nodes for detection AND tamper events. Tamper
+events (5001 real-time protection disabled, 5007 config changed, 5010/5012
+scanning disabled) carry no threat name. v0.1 silently dropped them because
+threat_name was mandatory, losing exactly the anti-forensics signal an
+investigator most needs. They are now first-class nodes.
 
-Other event IDs are skipped silently (logged in skip_count for the caller).
+Provenance rule: a record without `_evidence_hash` is REJECTED (counted in
+skipped_missing_provenance), never stamped with a placeholder hash. A node
+whose hash does not resolve in the evidence store would be fabricated
+provenance.
 """
 from __future__ import annotations
 
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+
+from pydantic import ValidationError
 
 from glaive.graph.nodes import AntivirusDetection
 from glaive.ingestion.base import Parser, ParseResult
 
+logger = logging.getLogger(__name__)
 
-# Supported Defender event IDs and the schema Principle 1 evidence chain
-SUPPORTED_EVENT_IDS = {1116, 1117, 1118, 1119, 5001}
+# event_id -> human description. Detection events carry a threat name;
+# tamper / health events do not.
+EVENT_DESCRIPTIONS: dict[int, str] = {
+    1006: "Malware detected (scan)",
+    1007: "Action taken to protect system (scan)",
+    1008: "Action to protect system failed",
+    1015: "Suspicious behavior detected",
+    1116: "Malware or potentially unwanted software detected",
+    1117: "Action taken to protect system",
+    1118: "Remediation action failed (non-critical)",
+    1119: "Remediation action failed (critical)",
+    5001: "Real-time protection disabled",
+    5007: "Antimalware platform configuration changed",
+    5010: "Scanning for malware and unwanted software disabled",
+    5012: "Scanning for viruses disabled",
+}
+
+SUPPORTED_EVENT_IDS = set(EVENT_DESCRIPTIONS)
+
+# Events that indicate defence evasion (ATT&CK T1562.001) rather than detection.
+TAMPER_EVENT_IDS = {5001, 5007, 5010, 5012}
 
 
 class DefenderParseResult(ParseResult):
@@ -31,34 +55,25 @@ class DefenderParseResult(ParseResult):
 
     skipped_event_count: int = 0
     skipped_event_ids: list[int] = []
+    skipped_malformed: int = 0
+    skipped_missing_provenance: int = 0
+    tamper_events: int = 0
 
 
 class DefenderEvtxParser(Parser):
-    """Parses pre-extracted Windows Defender event dicts into
-    AntivirusDetection nodes.
+    """Parses Windows Defender event dicts into AntivirusDetection nodes.
 
-    Source format: an iterable of dicts with these keys:
-      event_id, time_created, computer, threat_name, action, file_path
-
-    For Day 5: a thin upstream layer reads binary .evtx and yields this dict
-    shape. Today we accept the dicts directly.
+    Source format: an iterable of dicts with keys
+      event_id, time_created, computer, threat_name, action, file_path,
+      raw_data (optional), _evidence_hash, _derivation
     """
 
     source_type = "Defender EVTX"
 
     def parse(self, source: Any) -> DefenderParseResult:
-        """Parse an iterable of Defender event dicts.
-
-        The `source` parameter is either:
-          - A Path to a precomputed dict-list (JSON, future)
-          - A list/iterable of dicts (today)
-
-        For testability today, we accept any iterable.
-        """
         if isinstance(source, (str, Path)):
             raise NotImplementedError(
-                "Binary EVTX file parsing is a Day 5 task. "
-                "Pass an iterable of pre-parsed event dicts for now."
+                "Pass event dicts (use evtx_adapter.iter_evtx_events to read .evtx files)."
             )
 
         events: Iterable[dict] = source
@@ -72,38 +87,52 @@ class DefenderEvtxParser(Parser):
                     result.skipped_event_ids.append(event_id)
                 continue
 
+            if not event_dict.get("_evidence_hash"):
+                result.skipped_missing_provenance += 1
+                continue
+
             node = self._build_av_detection(event_dict)
-            if node is not None:
-                result.nodes.append(node)
+            if node is None:
+                result.skipped_malformed += 1
+                continue
+            if event_id in TAMPER_EVENT_IDS:
+                result.tamper_events += 1
+            result.nodes.append(node)
 
         return result
 
     def _build_av_detection(self, event_dict: dict) -> AntivirusDetection | None:
-        """Convert a single supported event dict into an AntivirusDetection node.
-
-        Returns None if the dict is malformed (missing required fields).
-        """
+        """Convert one supported event dict into a node; None if malformed."""
+        raw = event_dict.get("raw_data") or {}
+        event_id = event_dict["event_id"]
         try:
             detection_time = self._parse_iso_utc(event_dict["time_created"])
+            threat = event_dict.get("threat_name") or None
+            if threat is None and event_id not in TAMPER_EVENT_IDS:
+                # A detection event without a threat name is malformed.
+                raise ValueError("detection event missing threat_name")
             return AntivirusDetection(
-                evidence_hash=event_dict.get("_evidence_hash", "f" * 64),
+                evidence_hash=event_dict["_evidence_hash"],
                 derivation=event_dict.get("_derivation", self._derivation()),
                 host_hostname=event_dict["computer"],
-                event_id=event_dict["event_id"],
-                threat_name=event_dict["threat_name"],
+                event_id=event_id,
+                threat_name=threat,
                 detection_time=detection_time,
                 action_taken=event_dict.get("action"),
                 file_path=event_dict.get("file_path"),
+                event_description=EVENT_DESCRIPTIONS.get(event_id),
+                severity=raw.get("Severity Name") or None,
+                process_name=raw.get("Process Name") or None,
+                detection_user=raw.get("Detection User") or None,
             )
-        except (KeyError, ValueError) as e:
-            # Malformed event — skip it. (Day 5 will add proper logging.)
+        except (KeyError, ValueError, TypeError, ValidationError) as e:
+            logger.debug("Skipping malformed Defender event %s: %s", event_id, e)
             return None
 
     def _parse_iso_utc(self, ts_str: str) -> datetime:
-        """Parse an ISO 8601 datetime string, normalized to UTC tz-aware.
-
-        Supports both '+00:00' and 'Z' UTC formats.
-        """
-        # Python's fromisoformat accepts '+00:00' but not 'Z' in 3.10
-        # In 3.11+ it accepts both.
-        return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        """Parse ISO 8601 into tz-aware UTC. Naive timestamps are assumed UTC
+        (EVTX SystemTime is always UTC)."""
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)

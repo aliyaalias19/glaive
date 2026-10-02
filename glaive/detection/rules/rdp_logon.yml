@@ -1,0 +1,20 @@
+title: Remote Desktop Logon
+id: 0b4a7671-b5db-5818-a20f-75359b7f21f5
+status: experimental
+description: Someone logged on interactively over Remote Desktop.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.lateral_movement
+  - attack.t1021.001
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4624
+    LogonType: 10
+  condition: selection
+falsepositives:
+  - Normal remote administration
+level: informational

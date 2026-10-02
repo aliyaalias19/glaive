@@ -9,13 +9,11 @@ between the same nodes are distinct.
 """
 from __future__ import annotations
 
-from datetime import datetime
 from typing import ClassVar
 
 from pydantic import Field
 
 from glaive.graph.base import Edge, MultiSourceEdge
-
 
 # =============================================================================
 # Family A — process activity (all use MultiSourceEdge for confirmed_by)
@@ -231,3 +229,42 @@ class References(Edge):
         ...,
         description="'autorun' / 'task_action' / 'service_image' / 'shimcache' / 'amcache'.",
     )
+
+
+
+
+# =============================================================================
+# Family D - detections
+# =============================================================================
+
+
+class Triggered(Edge):
+    """An Alert concerns an entity (process, user, host, file, endpoint, script).
+
+    Direction: Alert -> entity. Lets the agent pivot from a rule hit to the
+    things it is about, and lets the grounding check see alert text when the
+    entity is cited.
+    """
+
+    edge_type: ClassVar[str] = "Triggered"
+
+    role: str | None = Field(None, description="e.g. 'process', 'parent', 'user', 'target'.")
+
+
+class Ran(Edge):
+    """A process executed a PowerShell script block. Direction: Process -> ScriptBlock."""
+
+    edge_type: ClassVar[str] = "Ran"
+
+
+def edge_registry() -> dict[str, type[Edge]]:
+    """Map edge_type -> concrete Edge class (used to load saved cases)."""
+    out: dict[str, type[Edge]] = {}
+    stack: list[type] = [Edge]
+    while stack:
+        cls = stack.pop()
+        for sub in cls.__subclasses__():
+            stack.append(sub)
+            if getattr(sub, "edge_type", ""):
+                out[sub.edge_type] = sub
+    return out
