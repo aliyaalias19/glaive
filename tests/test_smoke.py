@@ -8,7 +8,7 @@ import sys
 def test_package_imports() -> None:
     import glaive
 
-    assert glaive.__version__ == "0.1.0"
+    assert glaive.__version__ == "0.2.0"
 
 
 def test_cli_version_runs() -> None:
@@ -18,7 +18,7 @@ def test_cli_version_runs() -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert "glaive 0.1.0" in result.stdout
+    assert "glaive 0.2.0" in result.stdout
 
 
 def test_cli_investigate_missing_path_exits_2() -> None:
