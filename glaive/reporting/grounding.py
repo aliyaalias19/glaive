@@ -95,7 +95,8 @@ def extract_entities(text: str) -> list[Entity]:
     for kind, pat in _PATTERNS:
         for m in pat.finditer(masked):
             value = m.group(1) if pat.groups else m.group(0)
-            value = value.rstrip(".")
+            # Sentence punctuation is not part of a path/name: "...Pipe)." -> "...Pipe"
+            value = value.rstrip(".,;:)]}'\"")
             k = (kind, _norm(value))
             if k not in seen:
                 seen.add(k)
