@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GLAIVE</title>
+<style>
+:root{
+  --steel:#EEF1F4; --steel-2:#DDE3EA; --panel:#FFFFFF; --ink:#13233A; --muted:#55657A;
+  --line:#CDD5DF; --tag:#F2C230; --tag-ink:#3A2B00;
+  --ok:#147A4B; --warn:#A15C00; --bad:#B42318; --crit:#7A0E12; --focus:#1F5FD6;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --steel:#152033; --steel-2:#1D2A40; --panel:#1A2638; --ink:#E7ECF3; --muted:#9AA8BA;
+    --line:#2C3B53; --tag:#F2C230; --tag-ink:#2B2000; --ok:#4CC38A; --warn:#F5A524;
+    --bad:#FF6B5E; --crit:#FF8A80; --focus:#8AB4FF;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--steel);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans SC","Microsoft YaHei",sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--focus)}
+a.btn{color:var(--ink);text-decoration:none}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.app{display:grid;grid-template-columns:340px 1fr;grid-template-rows:auto 1fr;height:100vh}
+header{grid-column:1/-1;display:flex;align-items:center;gap:18px;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{font-weight:700;font-size:18px;letter-spacing:.02em}
+.brand small{display:block;font-weight:400;font-size:12px;color:var(--muted);letter-spacing:0}
+.case{flex:1;min-width:0}
+.case h1{margin:0;font-size:20px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.case .sub{color:var(--muted);font-size:13px}
+.counts{display:flex;gap:6px}
+.count{border:1px solid var(--line);border-radius:8px;padding:2px 9px;font-size:13px}
+.count b{margin-right:4px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 13px;cursor:pointer}
+.btn:hover{border-color:var(--ink)}
+.btn.primary{background:var(--tag);color:var(--tag-ink);border-color:var(--tag);font-weight:700}
+.btn:disabled{opacity:.55;cursor:progress}
+aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:var(--steel-2)}
+.drop{margin:14px;border:2px dashed var(--line);border-radius:12px;padding:16px;text-align:center;color:var(--muted);cursor:pointer;background:var(--panel)}
+.drop.over{border-color:var(--ink);color:var(--ink)}
+.drop strong{display:block;color:var(--ink);font-size:15px}
+.feedhead{display:flex;justify-content:space-between;align-items:baseline;padding:4px 16px 6px}
+.feedhead h2{margin:0;font-size:15px}
+.feedhead span{color:var(--muted);font-size:12px}
+#feed{flex:1;overflow:auto;padding:0 10px 16px;min-height:0}
+.ev{padding:7px 8px;border-radius:8px;font-size:13px;line-height:1.4;overflow-wrap:anywhere}
+.ev .who{color:var(--muted);font-size:12px}
+.ev.thought{color:var(--muted);font-style:italic}
+.stamp{display:inline-block;font-weight:700;font-size:11.5px;letter-spacing:.04em;padding:1px 7px;border:2px solid currentColor;border-radius:4px;transform:rotate(-2deg);margin-right:6px}
+.stamp.accepted{color:var(--ok)} .stamp.downgraded{color:var(--warn)} .stamp.rejected{color:var(--bad)}
+.ev.gate{background:var(--panel);border:1px solid var(--line);margin:6px 0}
+.ev.gate.new{animation:land .5s ease-out}
+@keyframes land{from{transform:scale(1.04);box-shadow:0 0 0 3px var(--tag)}to{transform:none;box-shadow:none}}
+@media (prefers-reduced-motion:reduce){.ev.gate.new{animation:none}}
+main{display:flex;flex-direction:column;min-height:0;min-width:0}
+nav{display:flex;gap:2px;padding:10px 20px 0;border-bottom:1px solid var(--line)}
+nav button{border:0;background:none;padding:9px 14px;border-bottom:3px solid transparent;cursor:pointer;color:var(--muted)}
+nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--tag);font-weight:700}
+.view{flex:1;overflow:auto;padding:18px 20px 40px;min-height:0}
+.view[hidden]{display:none}
+.summary{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 18px;margin-bottom:16px;max-width:980px;overflow-wrap:anywhere}
+.summary h3{font-size:16px;margin:12px 0 4px}
+.finding{background:var(--panel);border:1px solid var(--line);border-left:6px solid var(--sev,var(--line));border-radius:10px;padding:12px 14px;margin:10px 0;max-width:980px}
+.finding .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted)}
+.finding .ref{font-weight:700;color:var(--ink)}
+.pill{border:1px solid var(--line);border-radius:999px;padding:0 8px}
+.pill.pending{border-color:var(--tag);background:color-mix(in srgb,var(--tag) 22%,transparent);color:var(--ink)}
+.claim{font-size:16px;margin:7px 0;overflow-wrap:anywhere}
+.skeptic{border-left:3px solid var(--warn);padding:4px 10px;margin:6px 0;color:var(--muted);font-size:14px}
+.actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.keys{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px}
+.key{font-family:var(--mono);font-size:12px;background:var(--steel);border:1px solid var(--line);border-radius:6px;padding:2px 6px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+th{color:var(--muted);font-weight:700;position:sticky;top:0;background:var(--steel)}
+.hash{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.lvl{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+#graph{width:100%;height:calc(100vh - 170px);background:var(--panel);border:1px solid var(--line);border-radius:12px;touch-action:none}
+#graph text{font:11.5px system-ui,sans-serif;fill:var(--ink);pointer-events:none;paint-order:stroke;stroke:var(--panel);stroke-width:3px}
+#graph line{stroke:var(--line);stroke-width:1.4}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-bottom:8px}
+.ask{max-width:860px}
+.ask form{display:flex;gap:8px}
+.ask input{flex:1;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel)}
+.answer{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-top:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.empty{color:var(--muted);max-width:620px;padding:24px 0}
+.empty strong{color:var(--ink);display:block;font-size:17px;margin-bottom:4px}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);max-width:min(760px,94vw);width:100%}
+dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--mono);font-size:12.5px;background:var(--steel);padding:10px;border-radius:8px;max-height:60vh;overflow:auto}
+.toast{position:fixed;bottom:18px;right:18px;background:var(--ink);color:var(--panel);padding:10px 14px;border-radius:10px;font-size:14px;max-width:420px}
+@media (max-width:860px){
+  .app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr;height:auto;min-height:100vh}
+  aside{border-right:0;border-bottom:1px solid var(--line);max-height:42vh}
+  header{flex-wrap:wrap;padding:10px 16px;gap:10px}
+  .case{order:1;flex-basis:100%}
+  .brand{order:0}
+  .counts{order:2;width:100%;flex-wrap:wrap}
+  #lang,#runBtn,#reportLink{order:3}
+  nav{overflow-x:auto;padding:8px 16px 0}
+  .view{padding:14px 16px 40px}
+  #graph{height:70vh}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">GLAIVE<small>verified forensics</small></div>
+    <div class="case"><h1 id="caseName">Loading case</h1><div class="sub" id="caseSub"></div></div>
+    <div class="counts" id="counts" aria-label="Findings by severity"></div>
+    <select id="lang" class="btn" aria-label="Report language"><option value="en">English</option><option value="zh">中文</option></select>
+    <button class="btn primary" id="runBtn">Investigate</button>
+    <a class="btn" id="reportLink" href="report.html" target="_blank" rel="noopener">Open report</a>
+  </header>
+
+  <aside>
+    <label class="drop" id="drop" tabindex="0">
+      <strong>Add evidence</strong>
+      Drop .evtx, .json, .jsonl or a .zip triage package here, or click to choose files.
+      <input type="file" id="fileInput" multiple hidden>
+    </label>
+    <div class="feedhead"><h2>Verification gate</h2><span id="feedCount"></span></div>
+    <div id="feed" aria-live="polite"></div>
+  </aside>
+
+  <main>
+    <nav role="tablist">
+      <button role="tab" aria-selected="true" data-view="findings">Findings</button>
+      <button role="tab" aria-selected="false" data-view="timeline">Timeline</button>
+      <button role="tab" aria-selected="false" data-view="graph">Attack graph</button>
+      <button role="tab" aria-selected="false" data-view="evidence">Evidence</button>
+      <button role="tab" aria-selected="false" data-view="ask">Ask the case</button>
+    </nav>
+    <section class="view" id="v-findings"></section>
+    <section class="view" id="v-timeline" hidden></section>
+    <section class="view" id="v-graph" hidden>
+      <div class="legend" id="legend"></div>
+      <svg id="graph" role="img" aria-label="Evidence graph around the findings"></svg>
+    </section>
+    <section class="view" id="v-evidence" hidden></section>
+    <section class="view ask" id="v-ask" hidden>
+      <form id="askForm"><input id="askInput" placeholder="For example: did the attacker reach the file server?" aria-label="Question about the case"><button class="btn primary">Ask</button></form>
+      <p class="sub" style="color:var(--muted);font-size:13px">Answers may only state what the verified findings support. Sentences without a citation are removed before you see them.</p>
+      <div id="answers"></div>
+    </section>
+  </main>
+</div>
+<dialog id="nodeDlg"><h3 id="dlgTitle" style="margin-top:0"></h3><pre id="dlgBody"></pre><form method="dialog"><button class="btn">Close</button></form></dialog>
+
+<script>
+"use strict";
+const SEV = {critical:"var(--crit)",high:"var(--bad)",medium:"var(--warn)",low:"var(--muted)",info:"var(--line)",informational:"var(--line)"};
+let token = new URLSearchParams(location.search).get("token") || "";
+try { if (token) sessionStorage.setItem("glaiveToken", token); else token = sessionStorage.getItem("glaiveToken") || ""; } catch (e) {}
+const q = token ? ("token=" + encodeURIComponent(token)) : "";
+const api = (path, opts={}) => fetch(path + (q ? (path.includes("?") ? "&" : "?") + q : ""), opts)
+  .then(async r => { if (!r.ok) throw new Error((await r.json().catch(()=>({detail:r.statusText}))).detail || r.statusText); return r.json(); });
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+if (q) $("#reportLink").href = "report.html?" + q;
+
+function toast(msg){ const t=document.createElement("div"); t.className="toast"; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),4200); }
+
+// ---- tabs ----
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", x === b));
+  document.querySelectorAll(".view").forEach(v => v.hidden = v.id !== "v-" + b.dataset.view);
+  ({timeline:loadTimeline, graph:loadGraph, evidence:loadEvidence})[b.dataset.view]?.();
+}));
+
+// ---- case header ----
+async function loadCase(){
+  const c = await api("/api/case");
+  $("#caseName").textContent = c.stats.case_name;
+  const models = c.models ? "Models: " + c.models : "No AI model configured: rules-only mode";
+  $("#caseSub").textContent = `${c.stats.evidence_files} evidence files, ${c.stats.graph_nodes} graph nodes. ${models}`;
+  $("#runBtn").disabled = !!c.job;
+  $("#runBtn").textContent = c.job ? (c.job === "ingest" ? "Reading evidence..." : "Investigating...") : "Investigate";
+  if (c.last_error) toast(c.last_error);
+  return c;
+}
+
+// ---- findings ----
+async function loadFindings(){
+  const [c, fs] = await Promise.all([api("/api/case"), api("/api/findings")]);
+  const counts = {}; fs.forEach(f => counts[f.severity] = (counts[f.severity]||0)+1);
+  $("#counts").innerHTML = ["critical","high","medium","low"].map(s => `<span class="count" title="${s}"><b style="color:${SEV[s]}">${counts[s]||0}</b>${s}</span>`).join("");
+  const el = $("#v-findings");
+  if (!fs.length){
+    el.innerHTML = `<div class="empty"><strong>No findings yet</strong>Add evidence on the left, then choose Investigate. Without an AI model GLAIVE still runs its detection rules and records what they prove.</div>`;
+    return;
+  }
+  const summary = c.summary_markdown ? `<div class="summary">${md(c.summary_markdown)}</div>` : "";
+  el.innerHTML = summary + fs.map(f => `
+    <article class="finding" id="${f.ref}" style="--sev:${SEV[f.severity]}">
+      <div class="row"><span class="ref">${f.ref}</span><span class="pill">${esc(f.severity)}</span>
+        <span class="pill" title="Decided by the evidence, not the author">${esc(f.confidence)}</span>
+        <span class="pill ${f.status==="pending_approval"?"pending":""}">${esc(f.status.replaceAll("_"," "))}</span>
+        ${f.mitre_techniques.map(t=>`<span class="pill">${esc(t)}</span>`).join("")}
+        <span>by ${esc(f.author)}</span></div>
+      <p class="claim">${esc(f.claim)}</p>
+      ${f.skeptic ? `<div class="skeptic"><b>Skeptic: ${esc(f.skeptic.verdict)}.</b> ${esc(f.skeptic.argument)}</div>` : ""}
+      <div class="keys">${f.supporting_node_keys.map(k=>`<button class="key" data-key='${esc(JSON.stringify(k))}' title="Show evidence">${esc(k[0])}: ${esc(k.slice(1).filter(x=>x!==null).join(" / "))}</button>`).join("")}</div>
+      ${f.status==="pending_approval" ? `<div class="actions"><button class="btn" data-review="${esc(f.finding_id)}" data-approve="1">Approve</button><button class="btn" data-review="${esc(f.finding_id)}" data-approve="0">Reject</button></div>` : ""}
+    </article>`).join("");
+}
+function md(text){
+  return text.split("\n").map(l => {
+    let h = esc(l).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/\[(F\d+)\]/g,'<a href="#$1">$1</a>');
+    if (/^#{1,4}\s/.test(l)) return `<h3>${h.replace(/^#+\s/,"")}</h3>`;
+    if (/^\s*[-*]\s/.test(l)) return `<p>&bull; ${h.replace(/^\s*[-*]\s/,"")}</p>`;
+    return l.trim() ? `<p>${h}</p>` : "";
+  }).join("");
+}
+document.addEventListener("click", async e => {
+  const k = e.target.closest("[data-key]");
+  if (k){
+    const n = await api("/api/node?key=" + encodeURIComponent(k.dataset.key));
+    $("#dlgTitle").textContent = n.summary.node_type + " evidence";
+    $("#dlgBody").textContent = JSON.stringify({record: n.provenance.derivation, evidence_file: n.provenance.source_evidence, sha256: n.provenance.evidence_hash, observed_by: n.provenance.observed_by, ...n.summary}, null, 2);
+    $("#nodeDlg").showModal();
+  }
+  const r = e.target.closest("[data-review]");
+  if (r){
+    const approve = r.dataset.approve === "1";
+    const note = approve ? null : prompt("Why are you rejecting this finding? (optional)");
+    await api(`/api/findings/${r.dataset.review}/review`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({approve, reviewer:"analyst", note})});
+    toast(approve ? "Finding approved" : "Finding rejected"); loadFindings();
+  }
+});
+
+// ---- timeline ----
+async function loadTimeline(){
+  const rows = await api("/api/timeline?limit=1500");
+  const interesting = rows.filter(r => ["Alert","AntivirusDetection","ScheduledTask","Service","ScriptBlock"].includes(r.type));
+  $("#v-timeline").innerHTML = interesting.length ? `<table><thead><tr><th>Time (UTC)</th><th>Host</th><th>What</th><th>Type</th></tr></thead><tbody>${
+    interesting.map(r=>`<tr><td>${esc(r.time.replace("T"," ").slice(0,19))}</td><td>${esc(r.host||"")}</td><td><span class="lvl" style="background:${SEV[r.level]||"var(--muted)"}"></span><button class="key" style="font-family:inherit" data-key='${esc(JSON.stringify(r.key))}'>${esc(r.label)}</button></td><td>${esc(r.type)}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty"><strong>Nothing on the timeline yet</strong>Add evidence to see detections in time order.</div>`;
+}
+
+// ---- evidence ----
+async function loadEvidence(){
+  const ev = await api("/api/evidence");
+  $("#v-evidence").innerHTML = `<p><button class="btn" id="verifyBtn">Re-verify all hashes</button> <span style="color:var(--muted);font-size:13px">Recomputes the SHA-256 of every stored file and compares it with the hash recorded at intake.</span></p>
+  <table><thead><tr><th>File</th><th>Format</th><th>Bytes</th><th>SHA-256</th><th>Received (UTC)</th></tr></thead><tbody>${
+    ev.map(e=>`<tr><td>${esc(e.original_name)}</td><td>${esc(e.format)}</td><td>${esc(e.size_bytes)}</td><td class="hash">${esc(e.evidence_hash)}</td><td>${esc((e.ingested_at||"").slice(0,19).replace("T"," "))}</td></tr>`).join("")}</tbody></table>`;
+  $("#verifyBtn").onclick = async () => { const r = await api("/api/evidence/verify",{method:"POST"}); toast(r.failed.length ? `${r.failed.length} file(s) changed since intake` : `All ${r.ok} files match their recorded hashes`); };
+}
+
+// ---- graph (built-in force layout, no external libraries) ----
+const COLORS = {Alert:"var(--bad)",Process:"var(--focus)",User:"var(--ok)",Host:"var(--ink)",NetworkEndpoint:"var(--warn)",File:"var(--muted)",RegistryKey:"var(--muted)",Service:"var(--crit)",ScheduledTask:"var(--crit)",ScriptBlock:"var(--warn)",AntivirusDetection:"var(--bad)"};
+async function loadGraph(){
+  const g = await api("/api/graph?focus=findings&depth=1&limit=220");
+  const svg = $("#graph"); const W = svg.clientWidth || 900, H = svg.clientHeight || 600;
+  $("#legend").innerHTML = Object.entries(COLORS).filter(([t])=>g.nodes.some(n=>n.type===t)).map(([t,c])=>`<span><span class="lvl" style="background:${c}"></span>${t}</span>`).join("");
+  if (!g.nodes.length){ svg.innerHTML = ""; return; }
+  const idx = new Map(g.nodes.map((n,i)=>[n.id,i]));
+  const N = g.nodes.map((n,i)=>({...n, x: Math.cos(i*2.4)*(50+i*3), y: Math.sin(i*2.4)*(50+i*3), dx:0, dy:0}));
+  const E = g.edges.filter(e=>idx.has(e.source)&&idx.has(e.target)&&e.source!==e.target).map(e=>({...e,s:idx.get(e.source),t:idx.get(e.target)}));
+  // Fruchterman-Reingold: repulsion between all nodes, attraction along edges, cooling.
+  const k = Math.sqrt((W*H)/N.length) * 0.6; let temp = W/6;
+  for (let it=0; it<320; it++){
+    N.forEach(n=>{n.dx=0;n.dy=0;});
+    for (let a=0;a<N.length;a++) for (let b=a+1;b<N.length;b++){
+      let dx=N[a].x-N[b].x, dy=N[a].y-N[b].y, d=Math.sqrt(dx*dx+dy*dy)||0.01;
+      if (d > 3*k) continue;  // ignore far-away pairs so separate hosts stay near
+      const f=k*k/d;
+      N[a].dx+=dx/d*f; N[a].dy+=dy/d*f; N[b].dx-=dx/d*f; N[b].dy-=dy/d*f;
+    }
+    E.forEach(e=>{ const a=N[e.s], b=N[e.t]; const dx=a.x-b.x, dy=a.y-b.y, d=Math.sqrt(dx*dx+dy*dy)||0.01, f=d*d/k;
+      a.dx-=dx/d*f; a.dy-=dy/d*f; b.dx+=dx/d*f; b.dy+=dy/d*f; });
+    N.forEach(n=>{ const r=Math.sqrt(n.x*n.x+n.y*n.y)||0.01, g=r*r/k*0.06; n.dx-=n.x/r*g; n.dy-=n.y/r*g; });  // gravity
+    N.forEach(n=>{ const d=Math.sqrt(n.dx*n.dx+n.dy*n.dy)||0.01; n.x+=n.dx/d*Math.min(d,temp); n.y+=n.dy/d*Math.min(d,temp); });
+    temp *= 0.985;
+  }
+  // Fit the layout into the canvas, leaving room for labels.
+  const xs=N.map(n=>n.x), ys=N.map(n=>n.y), pad=40;
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+  const sc=Math.min((W-pad*2-120)/((maxX-minX)||1),(H-pad*2)/((maxY-minY)||1));
+  N.forEach(n=>{ n.x=pad+(n.x-minX)*sc; n.y=pad+(n.y-minY)*sc; });
+  const showLabel = n => N.length < 45 || ["Alert","Host","User","NetworkEndpoint","Service","ScheduledTask"].includes(n.type);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = E.map(e=>`<line x1="${N[e.s].x}" y1="${N[e.s].y}" x2="${N[e.t].x}" y2="${N[e.t].y}"><title>${esc(e.type)}</title></line>`).join("") +
+    N.map(n=>`<g class="key" data-key='${esc(n.id)}' style="cursor:pointer"><circle cx="${n.x}" cy="${n.y}" r="${n.type==="Alert"?8:6}" fill="${COLORS[n.type]||"var(--muted)"}"><title>${esc(n.type)}: ${esc(n.label)}</title></circle>${showLabel(n)?`<text x="${n.x+10}" y="${n.y+4}">${esc(n.label.slice(0,30))}</text>`:""}</g>`).join("");
+}
+
+// ---- ask ----
+$("#askForm").addEventListener("submit", async e => {
+  e.preventDefault(); const qtext = $("#askInput").value.trim(); if (!qtext) return;
+  const box = document.createElement("div"); box.className = "answer"; box.textContent = "Checking the evidence..."; $("#answers").prepend(box);
+  try {
+    const r = await api("/api/ask",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:qtext,language:$("#lang").value})});
+    box.innerHTML = `<b>${esc(qtext)}</b>\n\n${esc(r.answer).replace(/\[(F\d+)\]/g,'<a href="#$1" onclick="document.querySelector(\'nav [data-view=findings]\').click()">[$1]</a>')}${r.removed?.length?`\n\n<span style="color:var(--muted);font-size:13px">${r.removed.length} unverifiable sentence(s) removed.</span>`:""}`;
+  } catch(err){ box.textContent = "Could not answer: " + err.message; }
+});
+
+// ---- upload ----
+const drop = $("#drop"), fileInput = $("#fileInput");
+drop.addEventListener("keydown", e => { if (e.key==="Enter"||e.key===" ") { e.preventDefault(); fileInput.click(); } });
+["dragover","dragenter"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(t=>drop.addEventListener(t,()=>drop.classList.remove("over")));
+drop.addEventListener("drop", e => { e.preventDefault(); upload(e.dataTransfer.files); });
+fileInput.addEventListener("change", () => upload(fileInput.files));
+async function upload(files){
+  if (!files.length) return;
+  const fd = new FormData(); [...files].forEach(f=>fd.append("files", f));
+  try { const r = await api("/api/upload",{method:"POST",body:fd}); toast(`Reading ${r.saved.length} file(s)`); loadCase(); }
+  catch(err){ toast("Upload failed: " + err.message); }
+}
+
+// ---- investigate ----
+$("#runBtn").addEventListener("click", async () => {
+  try { const r = await api("/api/investigate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mode:"auto",language:$("#lang").value})});
+    toast(r.mode === "ai" ? "Investigation started with AI agents" : "Investigation started (rules only, no AI model configured)"); loadCase(); }
+  catch(err){ toast(err.message); }
+});
+
+// ---- live feed ----
+let shown = 0;
+function feed(e){
+  const d = e.detail || {}, a = e.action; let html = null, cls = "ev";
+  if (a === "gate_decision" || a === "rule_finding"){
+    const dec = d.decision || ""; const kind = dec.startsWith("rejected") ? "rejected" : dec === "downgraded_confidence" ? "downgraded" : "accepted";
+    cls += " gate new"; html = `<span class="stamp ${kind}">${kind}</span>${esc(d.claim||"")}${kind==="rejected"&&d.reason?`<div class="who">${esc(d.reason)}</div>`:""}<div class="who">${esc(e.actor)}</div>`;
+  } else if (a === "agent_thought"){ cls += " thought"; html = `${esc((d.text||"").slice(0,280))}<div class="who">${esc(d.agent)} thinking</div>`; }
+  else if (a === "tool_call"){ html = `<span class="who">${esc(d.agent)} looked at</span> ${esc(d.tool)}`; }
+  else if (a === "skeptic_reviewing"){ html = `<span class="who">Skeptic is challenging</span> ${esc((d.claim||"").slice(0,140))}`; }
+  else if (a === "file_ingested"){ html = `<span class="who">Evidence received</span> ${esc(d.file)} <span class="hash">${esc((d.sha256||"").slice(0,12))}</span> ${esc(d.events)} events`; }
+  else if (a === "ingest_finished"){ html = `<b>Evidence read:</b> ${esc(d.events)} events, ${esc(d.alerts)} detections`; loadFindings(); loadCase(); }
+  else if (a === "investigation_finished"){ html = `<b>Investigation complete:</b> ${esc(d.findings)} findings, ${esc(d.pending_approval)} awaiting your review`; loadFindings(); loadCase(); }
+  else if (a === "finding_reviewed"){ html = `<span class="who">Analyst reviewed</span> ${esc((d.claim||"").slice(0,120))}`; }
+  else if (a === "llm_error" || a === "agent_error"){ html = `<span style="color:var(--bad)">${esc(d.provider||d.agent)}: ${esc((d.error||"").slice(0,200))}</span>`; }
+  if (!html) return;
+  const div = document.createElement("div"); div.className = cls; div.innerHTML = html;
+  const f = $("#feed"); f.prepend(div); while (f.children.length > 300) f.lastChild.remove();
+  shown++; $("#feedCount").textContent = `${shown} events`;
+}
+function connect(){
+  const es = new EventSource("/api/events" + (q ? "?" + q : ""));
+  es.onmessage = m => { try { feed(JSON.parse(m.data)); } catch(e){} };
+  es.onerror = () => { es.close(); setTimeout(connect, 3000); };
+}
+
+loadCase().then(loadFindings).catch(err => { $("#caseName").textContent = "Cannot reach GLAIVE"; $("#caseSub").textContent = err.message; });
+connect();
+setInterval(() => loadCase().catch(()=>{}), 5000);
+</script>
+</body>
+</html>
