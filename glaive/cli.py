@@ -191,7 +191,7 @@ def demo(
     html_path, _ = _write_reports(session, ev.to_markdown())
     console.print(f"\nReport: [bold]{html_path}[/]")
     if serve_after:
-        serve(out / "case")
+        _serve(out / "case")
 
 
 @app.command()
@@ -202,6 +202,13 @@ def serve(
     no_browser: bool = typer.Option(False, help="Do not open a browser."),
 ) -> None:
     """Open the web app for a case."""
+    _serve(case, host, port, no_browser)
+
+
+def _serve(case: Path, host: str = "127.0.0.1", port: int = 8765,
+           no_browser: bool = False) -> None:
+    # Plain function so other commands can call it: calling a Typer command directly
+    # would pass its typer.Option(...) defaults instead of real values.
     import secrets
 
     import uvicorn

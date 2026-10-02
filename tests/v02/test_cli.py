@@ -41,3 +41,25 @@ def test_demo_investigate_verify(tmp_path: Path) -> None:
 
     assert _cli("report", "c2", cwd=tmp_path).returncode == 0
     assert "Default model" in _cli("models", cwd=tmp_path).stdout
+
+
+
+def test_demo_serve_starts_local_server(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    import uvicorn
+    from typer.testing import CliRunner
+
+    from glaive import cli
+
+    started: dict = {}
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: started.update(kw))
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: started.update(url=url))
+    for key in [k for k in os.environ if k.endswith("_API_KEY")]:
+        monkeypatch.delenv(key)
+    monkeypatch.delenv("GLAIVE_WEB_TOKEN", raising=False)
+
+    r = CliRunner().invoke(cli.app, ["demo", "--out", str(tmp_path / "d"), "--offline",
+                                     "--serve"])
+    assert r.exit_code == 0, r.output
+    assert started["host"] == "127.0.0.1" and started["port"] == 8765
+    assert started["url"] == "http://127.0.0.1:8765/"
+    assert "token" not in r.output
