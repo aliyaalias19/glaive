@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 - 2026-10
+
+### Fixed
+- `glaive demo --serve` crashed with `TypeError: argument of type 'OptionInfo' is not iterable` instead of opening the web app.
+
 ## 0.2.0 - 2026-10
 
 ### Fixed (found by auditing and running v0.1)
