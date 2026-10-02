@@ -1,0 +1,19 @@
+title: Microsoft Defender Real-Time Protection Disabled
+id: f5eef1d0-34fc-54e5-b945-01dc413630a8
+status: experimental
+description: Real-time protection was turned off. Attackers commonly disable Defender before running malware.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  product: windows
+  service: windefend
+detection:
+  selection:
+    EventID: 5001
+  condition: selection
+falsepositives:
+  - Administrator troubleshooting
+level: high

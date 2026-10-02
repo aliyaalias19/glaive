@@ -1,0 +1,23 @@
+title: Mshta Executes Script or Remote Content
+id: b077258d-95ac-5d07-b11f-4a6a9ff1bf7e
+status: experimental
+description: mshta.exe ran inline script or content from a URL.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.defense_evasion
+  - attack.t1218.005
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: '\\mshta.exe'
+    CommandLine|contains:
+      - 'http'
+      - 'javascript:'
+      - 'vbscript:'
+  condition: selection
+falsepositives:
+  - Some legacy line-of-business applications
+level: high

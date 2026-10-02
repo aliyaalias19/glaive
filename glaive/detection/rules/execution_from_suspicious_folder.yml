@@ -1,0 +1,24 @@
+title: Program Executed From a User-Writable Folder
+id: 62d3eddd-2911-5405-a62d-daa781a31142
+status: experimental
+description: A program ran from a temporary or public folder where malware is often dropped.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.execution
+  - attack.t1204.002
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|contains:
+      - '\\AppData\\Local\\Temp\\'
+      - '\\Users\\Public\\'
+      - '\\Windows\\Temp\\'
+      - '\\PerfLogs\\'
+      - '\\Downloads\\'
+  condition: selection
+falsepositives:
+  - Installers that unpack to Temp
+level: low

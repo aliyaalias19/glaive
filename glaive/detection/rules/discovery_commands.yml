@@ -1,0 +1,28 @@
+title: Account and Group Discovery Commands
+id: d8330825-4003-5522-8e4d-442a6e17918f
+status: experimental
+description: Commands used to enumerate users, groups or the current identity.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.discovery
+  - attack.t1087
+  - attack.t1033
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_whoami:
+    Image|endswith: '\\whoami.exe'
+  selection_net:
+    Image|endswith:
+      - '\\net.exe'
+      - '\\net1.exe'
+    CommandLine|contains:
+      - ' user'
+      - ' group'
+      - ' localgroup'
+  condition: 1 of selection_*
+falsepositives:
+  - Administrators and helpdesk scripts
+level: low

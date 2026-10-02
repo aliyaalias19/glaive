@@ -1,0 +1,36 @@
+title: Office Application Spawns a Shell or Script Host
+id: de358edd-e088-56af-95ac-c6f6fa9cf0c5
+status: experimental
+description: A Microsoft Office program started a command shell or script engine, the typical sign of a malicious document.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.initial_access
+  - attack.t1566.001
+  - attack.execution
+  - attack.t1204.002
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    ParentImage|endswith:
+      - '\\winword.exe'
+      - '\\excel.exe'
+      - '\\powerpnt.exe'
+      - '\\outlook.exe'
+      - '\\onenote.exe'
+  selection_child:
+    Image|endswith:
+      - '\\cmd.exe'
+      - '\\powershell.exe'
+      - '\\pwsh.exe'
+      - '\\wscript.exe'
+      - '\\cscript.exe'
+      - '\\mshta.exe'
+      - '\\rundll32.exe'
+      - '\\regsvr32.exe'
+  condition: all of selection_*
+falsepositives:
+  - Office add-ins that legitimately launch helpers
+level: high
