@@ -1,8 +1,7 @@
 [project]
 name = "glaive"
-version = "0.1.0"
-description = "Graph-Linked Adversarial Investigation & Verification Engine — extends Protocol SIFT with architectural hallucination resistance."
-readme = "README.md"
+version = "0.2.0"
+description = "AI forensic investigator whose every finding is verified against the evidence. Works with any model (Claude, GPT, DeepSeek, Qwen, Kimi, GLM, local) or none."
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Aliya Alias" }]
@@ -25,9 +24,19 @@ dependencies = [
     # Utilities
     "pyyaml>=6.0",
     "orjson>=3.10.0",
+    # AI model access (all providers speak HTTP; no vendor SDKs needed)
+    "httpx>=0.27",
+    # Web app
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
+# ~1000x faster EVTX parsing (Rust). Linux only: on Windows and macOS its
+# package folder "evtx" collides with python-evtx's "Evtx" (case-insensitive
+# file systems), which breaks both. GLAIVE falls back to python-evtx.
+fast = ["evtx>=0.8; sys_platform == 'linux'"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -45,12 +54,26 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["glaive*"]
 
+[tool.setuptools.package-data]
+"glaive.detection" = ["rules/*.yml"]
+"glaive.web" = ["static/*"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "W", "UP"]
+# Long string literals (paths, command lines, test fixtures) are clearer unwrapped.
+# UP017/UP035/UP037: the codebase consistently uses timezone.utc, typing
+# imports and quoted annotations; keep that style rather than churn files.
+ignore = ["E501", "UP017", "UP035", "UP037"]
+
+[tool.ruff.lint.per-file-ignores]
+# typer.Option()/Argument() and FastAPI File() in defaults are documented APIs.
+"glaive/cli.py" = ["B008"]
+"glaive/web/app.py" = ["B008"]
+"glaive/ingestion/volatility.py" = ["I001"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
