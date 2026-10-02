@@ -1,0 +1,22 @@
+title: Registry Run Key Modified
+id: bc5efd45-8f41-5305-9de6-27a10e5533cc
+status: experimental
+description: A program was registered to start automatically through a Run / RunOnce registry key.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.persistence
+  - attack.t1547.001
+logsource:
+  category: registry_set
+  product: windows
+detection:
+  selection:
+    TargetObject|contains:
+      - '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\'
+      - '\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce\\'
+      - '\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Run\\'
+  condition: selection
+falsepositives:
+  - Software that legitimately starts at logon
+level: medium

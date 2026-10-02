@@ -1,0 +1,23 @@
+title: Microsoft Defender Disabled via PowerShell
+id: f76bcd1b-ea5f-5572-a7ae-e6179b9e9712
+status: experimental
+description: PowerShell was used to switch off Defender protection features.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    CommandLine|contains:
+      - 'DisableRealtimeMonitoring $true'
+      - 'DisableRealtimeMonitoring 1'
+      - 'DisableBehaviorMonitoring $true'
+      - 'DisableIOAVProtection $true'
+  condition: selection
+falsepositives:
+  - None expected in production
+level: high

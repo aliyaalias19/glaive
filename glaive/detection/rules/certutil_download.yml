@@ -1,0 +1,25 @@
+title: Certutil Used to Download a File
+id: 2d0b8324-5f17-5ea3-ac56-b9549aede91e
+status: experimental
+description: certutil.exe was used to fetch a file from a URL, a well-known living-off-the-land download technique.
+author: GLAIVE project
+date: 2026/10/02
+tags:
+  - attack.command_and_control
+  - attack.t1105
+  - attack.defense_evasion
+  - attack.t1218
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_img:
+    Image|endswith: '\\certutil.exe'
+  selection_cli:
+    CommandLine|contains:
+      - 'urlcache'
+      - 'verifyctl'
+  condition: all of selection_*
+falsepositives:
+  - Rare administrative use
+level: high
