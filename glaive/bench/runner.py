@@ -254,6 +254,9 @@ def run_case(case: BenchCase, rules: list[SigmaRule], mode: str = "rules",
         res.error = f"{type(e).__name__}: {str(e)[:200]}"
     finally:
         res.seconds = round(time.perf_counter() - start, 2)
+        from glaive.retrieval.index import release_indexes
+
+        release_indexes(tmp)
         with contextlib.suppress(OSError):
             remove_tree(tmp)
     return res

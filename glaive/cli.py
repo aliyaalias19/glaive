@@ -8,8 +8,10 @@
     glaive models                    show which AI models GLAIVE can use
     glaive eval CASE --key FILE      score a case against an answer key
     glaive trace CASE                every model and tool call of a case (audit trail)
+    glaive search CASE "QUERY"       search the evidence in plain words
     glaive bench run DATASET PATH    benchmark on a public dataset (rules or AI)
     glaive bench compare FILES...    rules alone vs each model, side by side
+    glaive bench retrieval           recall@k of evidence search on the demo case
     glaive mcp [--case CASE]         run the MCP server (Claude Code, Cursor, Dify...)
 """
 from __future__ import annotations
@@ -309,6 +311,37 @@ def eval_cmd(case: Path = typer.Argument(..., help="Case folder."),
 
 
 @app.command()
+def search(case: Path = typer.Argument(..., help="Case folder."),
+           query: str = typer.Argument(..., help='e.g. "credential dumping"'),
+           limit: int = typer.Option(10, help="Number of results."),
+           mode: str = typer.Option("hybrid", help="hybrid, bm25 or dense."),
+           node_type: str = typer.Option(None, help="Only this node type, e.g. Process.")) -> None:
+    """Search a case's evidence graph (keyword + vector, see GLAIVE_EMBED)."""
+    from glaive.mcp_server.session import GlaiveSession
+    from glaive.retrieval import RetrievalConfigError, RetrievalError, configured_models
+    from glaive.retrieval.index import index_for
+
+    session = GlaiveSession.load(case)
+    try:
+        embedder, reranker = configured_models()
+        idx = index_for(session, embedder, reranker)
+        hits = idx.search(query, limit, mode=mode, node_type=node_type)
+    except (RetrievalError, RetrievalConfigError, ValueError) as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(2) from e
+    info = idx.info()
+    console.print(f"{info['documents']} nodes indexed, {info['vectors']} with vectors "
+                  f"({info['embedder'] or 'keyword search only; set GLAIVE_EMBED for vectors'}).")
+    t = Table(header_style="bold")
+    for col in ("#", "Type", "Node", "Found by"):
+        t.add_column(col)
+    for i, h in enumerate(hits, 1):
+        t.add_row(str(i), h.node_type, h.label[:70],
+                  ", ".join(f"{k} #{v}" for k, v in h.ranks.items()))
+    console.print(t)
+
+
+@app.command()
 def trace(case: Path = typer.Argument(..., help="Case folder."),
           as_json: bool = typer.Option(False, "--json", help="Print the summary as JSON.")) -> None:
     """Show the audit trail: model calls, tokens, tool calls and gate decisions."""
@@ -387,6 +420,49 @@ def bench_run(
     (out / f"{stem}.md").write_text(result.to_markdown(), encoding="utf-8")
     console.print(result.to_markdown())
     console.print(f"Saved {out / (stem + '.json')}")
+
+
+@bench_app.command("retrieval")
+def bench_retrieval() -> None:
+    """recall@k and MRR of evidence search on the demo case: keyword only, and
+    vector + hybrid when GLAIVE_EMBED is set (reranked when GLAIVE_RERANK is)."""
+    import tempfile
+
+    from glaive.demo.case import ANSWER_KEY, write_demo_case
+    from glaive.ingestion.pipeline import ingest_path
+    from glaive.mcp_server.session import GlaiveSession
+    from glaive.retrieval import RetrievalConfigError, configured_models
+    from glaive.retrieval.evaluate import evaluate, to_markdown
+    from glaive.retrieval.index import EvidenceIndex
+
+    try:
+        embedder, reranker = configured_models()
+    except RetrievalConfigError as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(2) from e
+    root = Path(tempfile.mkdtemp(prefix="glaive-retrieval-"))
+    try:
+        write_demo_case(root / "evidence")
+        session = GlaiveSession(analysis_dir=root / "case")
+        ingest_path(session, root / "evidence")
+        rows = []
+        keyword = EvidenceIndex(root / "case" / "keyword.sqlite")
+        keyword.build(session.graph)
+        rows.append(evaluate(keyword, ANSWER_KEY, mode="bm25"))
+        keyword.close()
+        if embedder is not None:
+            idx = EvidenceIndex(root / "case" / "hybrid.sqlite", embedder, reranker)
+            idx.build(session.graph)
+            rows.append(evaluate(idx, ANSWER_KEY, mode="dense", rerank=False))
+            rows.append(evaluate(idx, ANSWER_KEY, mode="hybrid", rerank=False))
+            if reranker is not None:
+                rows.append(evaluate(idx, ANSWER_KEY, mode="hybrid", rerank=True))
+            idx.close()
+    finally:
+        _remove_tree(root)
+    console.print(to_markdown(rows))
+    if embedder is None:
+        console.print("Keyword search only. Set GLAIVE_EMBED (e.g. fastembed) to compare.")
 
 
 @bench_app.command("compare")

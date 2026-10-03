@@ -53,6 +53,17 @@ class QueryGraphArgs(BaseModel):
     limit: int = Field(30, ge=1, le=100)
 
 
+class SearchEvidenceArgs(BaseModel):
+    """Search the whole case in plain words (keyword + meaning), e.g. "credential dumping",
+    "PowerShell started by Word", "persistence on FILESRV-01". Returns graph nodes you can
+    cite, best first, each with a short description of what it is connected to."""
+
+    query: str = Field(..., min_length=2, max_length=500)
+    node_type: str | None = Field(None, description="Only this node type, e.g. Process.")
+    host: str | None = Field(None, description="Only nodes from this hostname.")
+    limit: int = Field(10, ge=1, le=30)
+
+
 class NodeArgs(BaseModel):
     """Full details and provenance of one node."""
 
@@ -128,6 +139,7 @@ class AgentToolbox:
             "case_overview": (CaseOverviewArgs, self._overview),
             "list_alerts": (ListAlertsArgs, self._alerts),
             "query_graph": (QueryGraphArgs, self._query),
+            "search_evidence": (SearchEvidenceArgs, self._search),
             "get_node": (NodeArgs, self._node),
             "neighbors": (NeighborsArgs, self._neighbors),
             "timeline": (TimelineArgs, self._timeline),
@@ -221,6 +233,17 @@ class AgentToolbox:
             for n in res["nodes"]:
                 n.pop("evidence_hash", None)
         return res
+
+    def _search(self, a: SearchEvidenceArgs) -> dict[str, Any]:
+        from glaive.retrieval import RetrievalConfigError, RetrievalError, search_session
+
+        try:
+            hits = search_session(self.session, a.query, a.limit, node_type=a.node_type,
+                                  host=a.host)
+        except (RetrievalError, RetrievalConfigError) as e:
+            return {"error": "search_unavailable", "message": str(e)[:300]}
+        return {"query": a.query, "returned": len(hits),
+                "results": [h.to_dict(max_text=500) for h in hits]}
 
     def _node(self, a: NodeArgs) -> dict[str, Any]:
         key = core.resolve_key(self.session, a.canonical_key)

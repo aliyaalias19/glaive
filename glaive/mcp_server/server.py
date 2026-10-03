@@ -25,6 +25,7 @@ from glaive.agents.toolbox import (
     CaseOverviewArgs,
     ListAlertsArgs,
     NeighborsArgs,
+    SearchEvidenceArgs,
     TimelineArgs,
 )
 from glaive.mcp_server import tools
@@ -134,6 +135,15 @@ def build_server(session: GlaiveSession) -> FastMCP:
         canonical_key you can cite in commit_finding."""
         return reader._alerts(ListAlertsArgs(min_level=min_level, host=host,
                                              rule_contains=rule_contains, limit=limit))
+
+    @mcp.tool()
+    def search_evidence(query: str, node_type: str | None = None, host: str | None = None,
+                        limit: int = 10) -> dict:
+        """Search the whole case in plain words (keyword + meaning), e.g.
+        "credential dumping" or "PowerShell started by Word". Returns graph
+        nodes, best first, with the canonical_key to cite."""
+        return reader._search(SearchEvidenceArgs(query=query, node_type=node_type, host=host,
+                                                 limit=limit))
 
     @mcp.tool()
     def get_neighbors(canonical_key: list, edge_type: str | None = None,
