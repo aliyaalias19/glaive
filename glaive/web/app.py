@@ -351,6 +351,8 @@ def answer_question(session: GlaiveSession, question: str, language: str = "en")
         lines = [f"- {f.claim} [{fid}]" for fid, f in (relevant or rows[:5])]
         return {"answer": "\n".join(lines) or "No findings yet.", "mode": "retrieval",
                 "removed": []}
+    if router.privacy is not None:
+        router.privacy.learn_graph(session.graph)
     facts = "\n".join(f"[{fid}] ({f.severity}, {f.confidence}) {f.claim}" for fid, f in rows[:60])
     system = ("You answer questions about a forensic case using ONLY the findings listed. "
               "End every sentence with citations like [F3]. If the findings do not answer the "

@@ -294,6 +294,14 @@ def models() -> None:
                       "Example (PowerShell):  $env:DEEPSEEK_API_KEY = 'sk-...'\n"
                       "Example (bash):        export ANTHROPIC_API_KEY=sk-ant-...\n"
                       "Fully offline:         ollama pull qwen3:8b; set OLLAMA_MODEL=qwen3:8b")
+    from glaive.security.privacy import privacy_mode
+
+    console.print({
+        "pseudonymize": "Privacy: cloud models see tokens (USER_1, HOST_2...) instead of your "
+                        "account names, hosts, internal IPs and SIDs. Local models see real data.",
+        "local-only": "Privacy: local-only. Cloud models are never used.",
+        "off": "[yellow]Privacy: off. Case data is sent to cloud models unchanged.[/]",
+    }[privacy_mode()] + "  (GLAIVE_PRIVACY)")
 
 
 @app.command("eval")

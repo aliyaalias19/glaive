@@ -11,6 +11,9 @@
   not slow every call.
 - `token_budget` caps total tokens for the investigation (cost control).
 - Every call is recorded: per-provider calls, failures, tokens, latency.
+- With `privacy` set, case data is pseudonymised before it is sent to a
+  cloud provider and restored in the reply (see glaive.security.privacy).
+  Local providers (Ollama, localhost, private network) get the real data.
 """
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ from typing import Any
 
 from glaive.llm.providers import Provider
 from glaive.llm.types import BudgetExceeded, LLMError, LLMResponse, Message, ToolSpec
+from glaive.security.privacy import Pseudonymizer, is_local_provider
 
 
 @dataclass
@@ -55,6 +59,7 @@ class Router:
     on_event: Callable[[str, dict[str, Any]], None] | None = None
     sleep: Callable[[float], None] = time.sleep
     stats: dict[str, ProviderStats] = field(default_factory=dict)
+    privacy: Pseudonymizer | None = None
 
     def __post_init__(self) -> None:
         if not self.providers:
@@ -73,9 +78,13 @@ class Router:
         return " -> ".join(f"{p.name}:{p.model}" for p in self.providers)
 
     def summary(self) -> dict[str, Any]:
-        return {"chain": self.describe(), "tokens_used": self.tokens_used,
-                "token_budget": self.token_budget,
-                "providers": {n: s.to_dict() for n, s in self.stats.items()}}
+        out = {"chain": self.describe(), "tokens_used": self.tokens_used,
+               "token_budget": self.token_budget,
+               "providers": {n: s.to_dict() for n, s in self.stats.items()}}
+        if self.privacy is not None:
+            out["privacy"] = {"pseudonymized": self.privacy.summary(),
+                              "replacements": self.privacy.replacements}
+        return out
 
     def _emit(self, kind: str, **info: Any) -> None:
         if self.on_event:
@@ -98,9 +107,11 @@ class Router:
             candidates = [min(self.providers, key=lambda p: self.stats[p.name].open_until)]
         for provider in candidates:
             st = self.stats[provider.name]
+            masked = self.privacy is not None and not is_local_provider(provider)
+            wire = self.privacy.mask_messages(messages) if masked and self.privacy else messages
             for attempt in range(self.max_retries + 1):
                 try:
-                    resp = provider.complete(messages, tools, **kwargs)
+                    resp = provider.complete(wire, tools, **kwargs)
                 except LLMError as e:
                     with self._lock:
                         st.calls += 1
@@ -118,6 +129,8 @@ class Router:
                         self.sleep(delay)
                         continue
                     break  # next provider
+                if masked and self.privacy:
+                    resp.message = self.privacy.unmask_message(resp.message)
                 with self._lock:
                     st.calls += 1
                     st.consecutive_failures = 0
@@ -129,6 +142,6 @@ class Router:
                            input_tokens=resp.usage.input_tokens,
                            output_tokens=resp.usage.output_tokens,
                            latency_ms=round(resp.latency_ms, 1),
-                           fallback=provider is not self.providers[0])
+                           fallback=provider is not self.providers[0], pseudonymized=masked)
                 return resp
         raise LLMError("All model providers failed: " + " | ".join(errors[-6:]))

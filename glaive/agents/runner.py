@@ -63,6 +63,8 @@ class Investigation:
         mode = "ai" if self.router else "offline"
         if self.router is not None and self.router.on_event is None:
             self.router.on_event = lambda k, i: self._emit(k, {"agent": "router", **i})
+        if self.router is not None and self.router.privacy is not None:
+            self.router.privacy.learn_graph(self.session.graph)
         self._emit("investigation_started", {"mode": mode, "prompt_version": PROMPT_VERSION,
                                              "models": self.router.describe() if self.router
                                              else None})
