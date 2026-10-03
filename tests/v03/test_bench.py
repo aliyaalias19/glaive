@@ -164,3 +164,13 @@ def test_cli_bench_run_and_compare(tmp_path: Path, demo_dir: Path) -> None:
     assert r.exit_code == 0 and "rules only" in r.output
     r = CliRunner().invoke(app, ["bench", "run", "otrf", str(tmp_path / "nothing")])
     assert r.exit_code == 2
+
+
+def test_case_folders_are_removed_even_with_read_only_evidence(tmp_path: Path,
+                                                               demo_dir: Path) -> None:
+    # Evidence copies are read-only; on Windows plain rmtree leaves them behind.
+    rules, _ = load_rules()
+    work = tmp_path / "work"
+    work.mkdir()
+    r = run_case(BenchCase("demo", "t", [demo_dir]), rules, workdir=work)
+    assert r.error is None and list(work.iterdir()) == []

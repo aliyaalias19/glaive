@@ -45,20 +45,9 @@ LEVEL_STYLE = {"critical": "bold red", "high": "red", "medium": "yellow", "low":
 
 
 def _remove_tree(path: Path) -> None:
-    """shutil.rmtree that also removes read-only files (evidence copies are
-    read-only, and Windows refuses to delete read-only files otherwise)."""
-    import os
-    import shutil
-    import stat
+    from glaive.fsutil import remove_tree
 
-    def make_writable_and_retry(func, target, _exc):  # noqa: ANN001
-        os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
-        func(target)
-
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=make_writable_and_retry)
-    else:
-        shutil.rmtree(path, onerror=make_writable_and_retry)
+    remove_tree(path)
 
 
 def _slug(text: str) -> str:

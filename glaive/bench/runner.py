@@ -17,7 +17,7 @@ a false alarm.
 """
 from __future__ import annotations
 
-import shutil
+import contextlib
 import tempfile
 import time
 from collections import Counter
@@ -31,6 +31,7 @@ from glaive import __version__
 from glaive.bench.datasets import BenchCase
 from glaive.detection.attack import same_tactic, same_technique, tactic_name, tactics_of
 from glaive.detection.sigma import SigmaRule, load_rules
+from glaive.fsutil import remove_tree
 
 LEVELS = ("informational", "low", "medium", "high", "critical")
 
@@ -253,7 +254,8 @@ def run_case(case: BenchCase, rules: list[SigmaRule], mode: str = "rules",
         res.error = f"{type(e).__name__}: {str(e)[:200]}"
     finally:
         res.seconds = round(time.perf_counter() - start, 2)
-        shutil.rmtree(tmp, ignore_errors=True)
+        with contextlib.suppress(OSError):
+            remove_tree(tmp)
     return res
 
 
