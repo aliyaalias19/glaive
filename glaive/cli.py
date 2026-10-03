@@ -15,6 +15,7 @@
     glaive bench run DATASET PATH    benchmark on a public dataset (rules or AI)
     glaive bench compare FILES...    rules alone vs each model, side by side
     glaive bench retrieval           recall@k of evidence search on the demo case
+    glaive bench poisoning           planted prompt injections: detection and damage
     glaive mcp [--case CASE]         run the MCP server (Claude Code, Cursor, Dify...)
 """
 from __future__ import annotations
@@ -572,6 +573,19 @@ def bench_retrieval() -> None:
     console.print(to_markdown(rows))
     if embedder is None:
         console.print("Keyword search only. Set GLAIVE_EMBED (e.g. fastembed) to compare.")
+
+
+@bench_app.command("poisoning")
+def bench_poisoning(as_json: bool = typer.Option(False, "--json", help="Print JSON.")) -> None:
+    """Plant prompt injections in the demo case; measure detection, and what a
+    model that obeys every instruction could still achieve."""
+    from glaive.bench.poisoning import run_poisoning
+
+    result = run_poisoning()
+    if as_json:
+        console.print_json(json.dumps(result.to_dict()))
+    else:
+        console.print(result.to_markdown())
 
 
 @bench_app.command("compare")
