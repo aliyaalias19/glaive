@@ -51,7 +51,8 @@ def test_demo_serve_starts_local_server(tmp_path: Path, monkeypatch) -> None:  #
     from glaive import cli
 
     started: dict = {}
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: started.update(kw))
+    monkeypatch.setattr(uvicorn.Server, "run", lambda self, *a, **kw: started.update(
+        host=self.config.host, port=self.config.port))
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: started.update(url=url))
     for key in [k for k in os.environ if k.endswith("_API_KEY")]:
         monkeypatch.delenv(key)

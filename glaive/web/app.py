@@ -55,6 +55,11 @@ def _hostname(netloc: str) -> str:
     return netloc.rsplit(":", 1)[0]
 
 
+# Set when the server starts shutting down, so open event streams (browser tabs)
+# end at once instead of keeping Ctrl+C waiting.
+shutting_down = threading.Event()
+
+
 class LocalOnlyMiddleware:
     """Protection for the token-less local mode (plain ASGI, so streaming works).
 
@@ -306,7 +311,7 @@ def create_app(session: GlaiveSession, token: str | None = None) -> FastAPI:
             try:
                 for e in backlog[-400:]:
                     yield f"data: {json.dumps(e, default=str)}\n\n"
-                while not await request.is_disconnected():
+                while not shutting_down.is_set() and not await request.is_disconnected():
                     try:
                         e = q.get_nowait()
                         yield f"data: {json.dumps(e, default=str)}\n\n"

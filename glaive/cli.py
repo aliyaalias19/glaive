@@ -232,7 +232,17 @@ def _serve(case: Path, host: str = "127.0.0.1", port: int = 8765,
     console.print(f"GLAIVE web app for [bold]{session.case_name}[/]: {url}")
     if not no_browser:
         webbrowser.open(url)
-    uvicorn.run(create_app(session, token=token), host=host, port=port, log_level="warning")
+    from glaive.web.app import shutting_down
+
+    class _Server(uvicorn.Server):
+        def handle_exit(self, sig: int, frame: object) -> None:  # noqa: D102
+            shutting_down.set()
+            super().handle_exit(sig, frame)
+
+    shutting_down.clear()
+    config = uvicorn.Config(create_app(session, token=token), host=host, port=port,
+                            log_level="warning", timeout_graceful_shutdown=3)
+    _Server(config).run()
 
 
 @app.command()

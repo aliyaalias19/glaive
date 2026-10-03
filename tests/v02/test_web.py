@@ -120,3 +120,15 @@ def test_page_makes_no_third_party_requests() -> None:
     load fonts, scripts or styles from anywhere else."""
     page = (STATIC / "index.html").read_text(encoding="utf-8")
     assert "http://" not in page and "https://" not in page
+
+
+def test_event_stream_ends_when_server_shuts_down(client: TestClient) -> None:
+    # An open browser tab must not keep Ctrl+C waiting.
+    from glaive.web import app as web
+
+    web.shutting_down.set()
+    try:
+        r = client.get("/api/events")
+        assert r.status_code == 200 and r.text.startswith("data: ")
+    finally:
+        web.shutting_down.clear()
