@@ -126,3 +126,19 @@ def test_rule_files_are_valid_yaml() -> None:
     for f in BUILTIN_RULES_DIR.glob("*.yml"):
         doc = yaml.safe_load(f.read_text(encoding="utf-8"))
         assert {"title", "id", "logsource", "detection", "level"} <= set(doc), f.name
+
+
+def test_engine_prefilter_gives_the_same_matches_as_checking_every_rule(demo_dir: Path) -> None:
+    from glaive.detection.sigma import event_view
+    from glaive.ingestion.jsonl import iter_json_events
+    from glaive.ingestion.windows import classify_channel
+
+    rules, _ = load_rules()
+    engine = SigmaEngine(rules)
+    events = [e for f in sorted(demo_dir.glob("*.jsonl")) for e in iter_json_events(f)]
+    assert len(events) > 100
+    for e in events:
+        view, fam, eid = event_view(e), classify_channel(e), e.get("event_id") or 0
+        brute = [r.id for r in rules if r.matches(fam, eid, view)]
+        assert [r.id for r in engine.match(e)] == brute
+    assert len(engine._candidates) < len(events)  # worked out once per (family, event id)

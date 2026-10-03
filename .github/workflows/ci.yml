@@ -33,7 +33,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]" "${{ matrix.mcp }}"
       - name: Lint
-        run: ruff check glaive tests/v02
+        run: ruff check glaive tests/v02 tests/v03
       - name: Tests
         run: python -m pytest -q
       - name: Bypass (adversarial) tests
@@ -55,3 +55,32 @@ jobs:
           for i in $(seq 1 30); do curl -fs -H "X-Glaive-Token: ci-token" http://127.0.0.1:8765/api/case && break; sleep 1; done
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/api/case)" = "401"
           docker exec glaive-ci glaive demo --out /tmp/demo --offline
+
+  benchmark:
+    name: Benchmarks on public data (rules only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Pinned so the numbers can only change when GLAIVE changes.
+      EVTX_SAMPLES_COMMIT: 4ceed2f4706daf601c212a8f91c113dd85349a2c
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e ".[dev,fast]"
+      - name: Fetch EVTX-ATTACK-SAMPLES
+        run: |
+          git init -q samples && cd samples
+          git remote add origin https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES.git
+          git fetch -q --depth 1 origin "$EVTX_SAMPLES_COMMIT" && git checkout -q FETCH_HEAD
+      - name: Detection floors (EVTX-ATTACK-SAMPLES)
+        env:
+          GLAIVE_EVTX_SAMPLES: samples
+        run: python -m pytest -q -m integration tests/v03/test_bench_real.py tests/v02/test_real_samples.py
+      - name: Benchmark report
+        run: |
+          glaive bench run evtx-attack-samples samples --out bench-results
+          glaive bench poisoning
+          glaive bench retrieval

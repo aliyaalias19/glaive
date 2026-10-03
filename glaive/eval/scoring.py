@@ -10,6 +10,10 @@ Metrics
   ungrounded_in_report  committed findings with an entity missing from their
                    evidence. By construction of the gate this should be 0;
                    the scorer re-checks it independently.
+  calibration      for each confidence level, the share of findings that
+                   cover an answer-key item. A well-calibrated investigator
+                   is right more often when it says "confirmed" than when it
+                   says "inferred".
 
 A finding "covers" an item when ALL the item's terms appear in the finding's
 claim or in the attributes of the nodes it cites.
@@ -41,6 +45,7 @@ class EvalResult:
     ungrounded_in_report: int
     attack_expected: list[str]
     attack_found: list[str]
+    calibration: dict[str, dict[str, int]] = field(default_factory=dict)
 
     @property
     def recall(self) -> float:
@@ -60,6 +65,8 @@ class EvalResult:
             "recall": round(self.recall, 3), "precision_proxy": round(self.precision_proxy, 3),
             "attack_coverage": round(self.attack_coverage, 3), "findings": self.findings,
             "blocked_by_gate": self.blocked, "ungrounded_in_report": self.ungrounded_in_report,
+            "calibration": {c: {**v, "share": round(v["matching"] / v["findings"], 3)}
+                            for c, v in self.calibration.items() if v["findings"]},
             "items": [i.__dict__ for i in self.items],
         }
 
@@ -74,6 +81,12 @@ class EvalResult:
                   f"- ATT&CK technique coverage: {self.attack_coverage:.0%}",
                   f"- Claims blocked by the gate: {self.blocked}",
                   f"- Ungrounded statements in the final report: {self.ungrounded_in_report}"]
+        if any(v["findings"] for v in self.calibration.values()):
+            lines += ["", "| Confidence | Findings | Match the key |", "|---|---|---|"]
+            for conf, v in self.calibration.items():
+                if v["findings"]:
+                    lines.append(f"| {conf} | {v['findings']} | "
+                                 f"{v['matching'] / v['findings']:.0%} ({v['matching']}) |")
         return "\n".join(lines) + "\n"
 
 
@@ -103,4 +116,11 @@ def score_session(session: Any, answer_key: list[dict[str, Any]] | list[Any]) ->
                   and str(e.get("detail", {}).get("decision", "")).startswith("rejected"))
     expected = sorted({t for k in key for t in k.get("mitre", [])})
     found = sorted({t for f in findings for t in f.mitre_techniques})
-    return EvalResult(items, len(findings), len(matched), blocked, ungrounded, expected, found)
+    calibration = {c: {"findings": 0, "matching": 0}
+                   for c in ("confirmed", "suspected", "inferred", "disputed")}
+    for f in findings:
+        slot = calibration.setdefault(f.confidence, {"findings": 0, "matching": 0})
+        slot["findings"] += 1
+        slot["matching"] += f.short_id in matched
+    return EvalResult(items, len(findings), len(matched), blocked, ungrounded, expected, found,
+                      calibration)

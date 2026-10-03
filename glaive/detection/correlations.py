@@ -139,7 +139,7 @@ def prompt_injection_in_evidence(events: list[dict]) -> list[CorrelationHit]:
                     title="Prompt-Injection Text Planted in Evidence",
                     level="high",
                     description=("Evidence contains text that tries to instruct an AI "
-                                 f"investigator ({', '.join(h.pattern for h in found)}). GLAIVE "
+                                 f"investigator ({', '.join(h.pattern if h.via == 'plain' else f'{h.pattern}, hidden by {h.via}' for h in found)}). GLAIVE "
                                  "treats it as data only. Its presence suggests an attacker "
                                  "anticipating AI-assisted analysis."),
                     mitre=["T1036"],

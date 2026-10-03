@@ -25,6 +25,8 @@ Overrides:
                                                    OPENAI, DEEPSEEK, QWEN, KIMI, GLM, DOUBAO,
                                                    GEMINI, OPENROUTER, SILICONFLOW, OLLAMA
     GLAIVE_TOKEN_BUDGET=200000                     stop after this many tokens
+    GLAIVE_PRIVACY=pseudonymize|local-only|off     what cloud models may see
+                                                   (see glaive.security.privacy)
 
 Default model names were checked against provider documentation in
 October 2026. Providers rename models often; override them if a default
@@ -40,6 +42,7 @@ import httpx
 
 from glaive.llm.providers import AnthropicProvider, OpenAICompatProvider, Provider
 from glaive.llm.router import Router
+from glaive.security.privacy import Pseudonymizer, is_local_provider, privacy_mode
 
 
 @dataclass(frozen=True)
@@ -135,11 +138,18 @@ def router_from_env(env: Mapping[str, str] | None = None, client: httpx.Client |
     names = detect_providers(env)
     if not names:
         return None
+    mode = privacy_mode(env)
     providers = []
     for i, n in enumerate(names):
         model = env.get("GLAIVE_MODEL") if i == 0 and env.get("GLAIVE_MODEL") else None
         providers.append(build_provider(n, env, model=model, client=client))
+    if mode == "local-only":
+        providers = [p for p in providers if is_local_provider(p)]
+        if not providers:
+            return None
     budget = env.get("GLAIVE_TOKEN_BUDGET")
     if budget and "token_budget" not in router_kwargs:
         router_kwargs["token_budget"] = int(budget)
+    if mode == "pseudonymize" and "privacy" not in router_kwargs:
+        router_kwargs["privacy"] = Pseudonymizer()
     return Router(providers, **router_kwargs)  # type: ignore[arg-type]

@@ -33,6 +33,7 @@ from typing import Any
 
 import yaml
 
+from glaive.detection.attack import tactics_of
 from glaive.ingestion.windows import classify_channel
 
 logger = logging.getLogger(__name__)
@@ -359,6 +360,10 @@ class SigmaRule:
                 out.append(m.group(1).upper())
         return out
 
+    @property
+    def mitre_tactics(self) -> list[str]:
+        return tactics_of(self.mitre_techniques, self.tags)
+
     def matches(self, family: str, event_id: int, view: dict[str, str]) -> bool:
         return self._accepts(family, event_id) and self._match(view)
 
@@ -435,9 +440,25 @@ class SigmaEngine:
 
     def __init__(self, rules: list[SigmaRule]) -> None:
         self.rules = rules
+        # Which rules accept a (log family, event id) depends only on the rule's
+        # logsource, so it is worked out once per pair instead of per event.
+        # With the 2,000+ SigmaHQ rules most events are only checked against a
+        # handful of candidates.
+        self._candidates: dict[tuple[str, int], list[SigmaRule]] = {}
+
+    def candidates(self, family: str, event_id: int) -> list[SigmaRule]:
+        key = (family, event_id)
+        found = self._candidates.get(key)
+        if found is None:
+            found = [r for r in self.rules if r._accepts(family, event_id)]
+            self._candidates[key] = found
+        return found
 
     def match(self, ev: dict[str, Any]) -> list[SigmaRule]:
         family = classify_channel(ev)
         event_id = ev.get("event_id") or 0
+        rules = self.candidates(family, event_id)
+        if not rules:
+            return []
         view = event_view(ev)
-        return [r for r in self.rules if r.matches(family, event_id, view)]
+        return [r for r in rules if r._match(view)]

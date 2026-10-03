@@ -120,7 +120,7 @@ dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--mono);f
   <aside>
     <label class="drop" id="drop" tabindex="0">
       <strong>Add evidence</strong>
-      Drop .evtx, .json, .jsonl or a .zip triage package here, or click to choose files.
+      Drop .evtx, .json, .jsonl or a .zip / .tar.gz triage package here, or click to choose files.
       <input type="file" id="fileInput" multiple hidden>
     </label>
     <div class="feedhead"><h2>Verification gate</h2><span id="feedCount"></span></div>
@@ -144,7 +144,7 @@ dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--mono);f
     <section class="view" id="v-evidence" hidden></section>
     <section class="view ask" id="v-ask" hidden>
       <form id="askForm"><input id="askInput" placeholder="For example: did the attacker reach the file server?" aria-label="Question about the case"><button class="btn primary">Ask</button></form>
-      <p class="sub" style="color:var(--muted);font-size:13px">Answers may only state what the verified findings support. Sentences without a citation are removed before you see them.</p>
+      <p class="sub" style="color:var(--muted);font-size:13px">Answers may only state what the verified findings [F#] and the evidence [E#] support. Sentences without a citation, or naming anything their sources do not contain, are removed before you see them.</p>
       <div id="answers"></div>
     </section>
   </main>
@@ -199,7 +199,7 @@ async function loadFindings(){
     <article class="finding" id="${f.ref}" style="--sev:${SEV[f.severity]}">
       <div class="row"><span class="ref">${f.ref}</span><span class="pill">${esc(f.severity)}</span>
         <span class="pill" title="Decided by the evidence, not the author">${esc(f.confidence)}</span>
-        <span class="pill ${f.status==="pending_approval"?"pending":""}">${esc(f.status.replaceAll("_"," "))}</span>
+        <span class="pill ${f.status==="pending_approval"?"pending":""}" ${f.approval_reason?`title="Needs approval: ${esc(f.approval_reason)}"`:""}>${esc(f.status.replaceAll("_"," "))}</span>
         ${f.mitre_techniques.map(t=>`<span class="pill">${esc(t)}</span>`).join("")}
         <span>by ${esc(f.author)}</span></div>
       <p class="claim">${esc(f.claim)}</p>
@@ -294,7 +294,13 @@ $("#askForm").addEventListener("submit", async e => {
   const box = document.createElement("div"); box.className = "answer"; box.textContent = "Checking the evidence..."; $("#answers").prepend(box);
   try {
     const r = await api("/api/ask",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:qtext,language:$("#lang").value})});
-    box.innerHTML = `<b>${esc(qtext)}</b>\n\n${esc(r.answer).replace(/\[(F\d+)\]/g,'<a href="#$1" onclick="document.querySelector(\'nav [data-view=findings]\').click()">[$1]</a>')}${r.removed?.length?`\n\n<span style="color:var(--muted);font-size:13px">${r.removed.length} unverifiable sentence(s) removed.</span>`:""}`;
+    const cites = r.citations || {};
+    const link = (m, id) => {
+      const c = cites[id];
+      if (c && c.kind === "evidence") return `<button class="key" data-key='${esc(JSON.stringify(c.canonical_key))}' title="${esc(c.node_type + ": " + c.label)}">${id}</button>`;
+      return `<a href="#${id}" onclick="document.querySelector('nav [data-view=findings]').click()">[${id}]</a>`;
+    };
+    box.innerHTML = `<b>${esc(qtext)}</b>\n\n${esc(r.answer).replace(/\[([FE]\d+)\]/g, link)}${r.removed?.length?`\n\n<span style="color:var(--muted);font-size:13px">${r.removed.length} unverifiable sentence(s) removed.</span>`:""}`;
   } catch(err){ box.textContent = "Could not answer: " + err.message; }
 });
 

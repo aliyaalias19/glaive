@@ -9,6 +9,12 @@ and the common export shapes produced by tools such as EvtxECmd, Chainsaw
 or `evtx_dump -o jsonl` (Event.System / Event.EventData nesting, or flat
 EventID/TimeCreated/Computer/Channel keys). This makes the synthetic demo
 case, test fixtures and exports from other tools all ingestible.
+
+Also log-shipper exports:
+  - NXLog / Logstash (used by OTRF Security-Datasets): every field at the top
+    level, the host in "Hostname" (not "host", which is the collector).
+  - Winlogbeat / Elastic: {"winlog": {"event_id", "computer_name",
+    "channel", "event_data": {...}}, "@timestamp": ...}.
 """
 from __future__ import annotations
 
@@ -23,6 +29,68 @@ from glaive.ingestion.evtx_adapter import (
     _json_event_to_dict,
     _normalize_time_string,
 )
+
+# NXLog / Logstash bookkeeping fields: everything else in a flat NXLog record
+# is event data.
+_SHIPPER_FIELDS = frozenset({
+    "EventID", "EventTime", "EventReceivedTime", "EventType", "SourceModuleName",
+    "SourceModuleType", "SourceName", "ProviderGuid", "Hostname", "host", "port", "tags",
+    "Channel", "Keywords", "SeverityValue", "Severity", "Opcode", "OpcodeValue", "RecordNumber",
+    "ExecutionProcessID", "ThreadID", "Task", "Version", "Category", "@version", "@timestamp",
+    "ERROR_EVT_UNRESOLVED", "AccountType", "AccountName", "Domain", "UserID",
+})
+
+
+def _from_nxlog(obj: dict[str, Any]) -> dict | None:
+    """Flat NXLog / Logstash record (OTRF Security-Datasets)."""
+    computer = obj.get("Hostname")
+    # Sysmon's UtcTime is the event time; @timestamp is when Logstash received it.
+    ts = obj.get("UtcTime") or obj.get("@timestamp") or obj.get("EventTime")
+    eid = obj.get("EventID")
+    if eid is None or not ts or not computer:
+        return None
+    raw = {k: "" if v is None else (v if isinstance(v, str) else json.dumps(v)
+                                    if isinstance(v, (dict, list)) else str(v))
+           for k, v in obj.items() if k not in _SHIPPER_FIELDS}
+    raw = _canon_all(raw)
+    return {
+        "event_id": int(eid),
+        "time_created": _normalize_time_string(str(ts)),
+        "computer": str(computer),
+        "channel": obj.get("Channel"),
+        "provider": obj.get("SourceName"),
+        "threat_name": raw.get("Threat Name"),
+        "action": raw.get("Action Name"),
+        "file_path": _clean_defender_path(raw.get("Path")),
+        "raw_data": raw,
+        "_record_id": obj.get("RecordNumber"),
+        "_process_id": obj.get("ExecutionProcessID"),
+    }
+
+
+def _from_winlogbeat(obj: dict[str, Any]) -> dict | None:
+    wl = obj["winlog"]
+    eid = wl.get("event_id")
+    ts = obj.get("@timestamp")
+    computer = wl.get("computer_name")
+    if eid is None or not ts or not computer:
+        return None
+    data = wl.get("event_data") or {}
+    raw = _canon_all({k: "" if v is None else str(v) for k, v in data.items()})
+    proc = wl.get("process") or {}
+    return {
+        "event_id": int(eid),
+        "time_created": _normalize_time_string(str(ts)),
+        "computer": str(computer),
+        "channel": wl.get("channel"),
+        "provider": wl.get("provider_name"),
+        "threat_name": raw.get("Threat Name"),
+        "action": raw.get("Action Name"),
+        "file_path": _clean_defender_path(raw.get("Path")),
+        "raw_data": raw,
+        "_record_id": wl.get("record_id"),
+        "_process_id": proc.get("pid") if isinstance(proc, dict) else None,
+    }
 
 
 def _from_flat(obj: dict[str, Any]) -> dict | None:
@@ -60,6 +128,11 @@ def normalize_json_event(obj: Any) -> dict | None:
         ev = obj["Event"]
         rec = (ev.get("System") or {}).get("EventRecordID")
         return _json_event_to_dict(ev, rec)
+    if isinstance(obj.get("winlog"), dict):
+        return _from_winlogbeat(obj)
+    if "Hostname" in obj and "EventID" in obj and not any(
+            k in obj for k in ("EventData", "raw_data", "Payload")):
+        return _from_nxlog(obj)
     return _from_flat(obj)
 
 

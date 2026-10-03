@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.3.0 - 2026-10
+
+### Added
+- **Benchmarks on public data** (`glaive bench run`): EVTX-ATTACK-SAMPLES,
+  OTRF Security-Datasets and the NextronSystems evtx-baseline goodware logs,
+  scored against the datasets' own ATT&CK labels at alert and finding level;
+  `glaive bench compare` puts runs side by side (rules alone vs each model).
+  CI enforces detection floors on EVTX-ATTACK-SAMPLES.
+- **Log-poisoning benchmark** (`glaive bench poisoning`): nine planted prompt
+  injections plus a control, and what a model that obeys them could achieve.
+- **Privacy**: case data is pseudonymised (USER_1, HOST_2...) before it is
+  sent to a cloud model, embedder or reranker, and restored in replies.
+  `GLAIVE_PRIVACY=local-only|pseudonymize|off`.
+- **Audit trail**: spans for every investigation, agent, model call and tool
+  call in `<case>/trace.jsonl` (OpenTelemetry GenAI conventions, no prompt
+  text); optional OTLP export (`glaive[otel]`); `glaive trace CASE`.
+- **Evidence search (GraphRAG)**: BM25 + optional vectors (local fastembed or
+  Ollama, or OpenAI-compatible APIs) fused with RRF, optional reranker; nodes
+  are indexed with their neighbours. `glaive search`, `search_evidence` tool
+  for agents and MCP, `glaive bench retrieval` (recall@k, MRR).
+- **Ask the case** answers from findings and evidence nodes, with checked
+  `[F#]` / `[E#]` citations; `glaive ask CASE QUESTION`.
+- **Past-case memory** (opt-in, local): `glaive remember`, `glaive memory`,
+  indicator overlaps with earlier cases, `recall_past_cases` agent tool.
+- ATT&CK tactics on alerts, from a bundled Enterprise ATT&CK v19.2 table
+  (old names and revoked IDs such as T1562.001 still resolve).
+- Confidence calibration in `glaive eval`.
+- Readers for NXLog/Logstash (OTRF) and Winlogbeat JSON; `.tar`, `.tar.gz`
+  and `.tgz` evidence archives with the same safety checks as zips.
+- `ROADMAP.md`.
+
+### Changed
+- Prompt-injection detection also finds text hidden with zero-width
+  characters, look-alike letters or Base64 (e.g. `powershell -enc`): 9/9
+  planted payloads detected instead of 6/9.
+- Findings from a model that clear activity ("no malicious activity", "false
+  positive", "the host is clean") wait for analyst approval.
+- A Skeptic refutation of a rule finding no longer marks it disputed; it goes
+  to an analyst with the Skeptic's argument.
+- Sigma rules are pre-filtered per log source and event ID: 2,200 SigmaHQ rules
+  run about 2.7x faster with identical results.
+- `numpy` is now a dependency (vector search).
+
+### Fixed
+- With the web app open in a browser, Ctrl+C did not stop `glaive serve`; a
+  second Ctrl+C exited with a traceback.
+- The verdict-tampering injection pattern fired on word lists in real Windows
+  registry values.
+
 ## 0.2.1 - 2026-10
 
 ### Fixed

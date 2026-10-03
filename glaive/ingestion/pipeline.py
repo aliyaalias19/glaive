@@ -3,7 +3,8 @@
     summary = ingest_path(session, Path("./triage.zip"))
 
 Steps:
-  1. Collect files (folders walked; .zip archives safely extracted).
+  1. Collect files (folders walked; .zip and .tar/.tar.gz/.tgz archives
+     safely extracted).
   2. Hash every file into the evidence store (chain of custody first).
   3. Detect each file's format from its bytes and read its events
      (EVTX binary, JSON / JSON-Lines exports).
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tarfile
 import zipfile
 from collections import Counter
 from collections.abc import Callable
@@ -25,6 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from glaive.detection.attack import tactics_of
 from glaive.detection.correlations import (
     CorrelationHit,
     brute_force_then_success,
@@ -107,29 +110,86 @@ class PipelineSummary:
 # ---- file collection -----------------------------------------------------------
 
 
-def safe_extract(archive: Path, dest: Path) -> list[Path]:
-    """Extract a zip with zip-slip, zip-bomb and symlink protection."""
+_TAR_SUFFIXES = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
+
+
+def is_archive(path: Path) -> bool:
+    name = path.name.lower()
+    if name.endswith(".zip"):
+        return zipfile.is_zipfile(path)
+    if name.endswith(_TAR_SUFFIXES):
+        try:
+            return tarfile.is_tarfile(path)
+        except OSError:
+            return False
+    return False
+
+
+def _archive_stem(path: Path) -> str:
+    name = path.name
+    for suffix in (".zip", *_TAR_SUFFIXES):
+        if name.lower().endswith(suffix):
+            return name[: -len(suffix)]
+    return path.stem
+
+
+def _safe_target(archive: Path, dest: Path, member: str) -> Path:
+    name = PurePosixPath(member.replace("\\", "/"))
+    if name.is_absolute() or ".." in name.parts or ":" in member:
+        raise ArchiveError(f"{archive.name}: unsafe path {member!r}")
+    target = (dest / Path(*name.parts)).resolve()
+    if dest not in target.parents:
+        raise ArchiveError(f"{archive.name}: unsafe path {member!r}")
+    return target
+
+
+def _check_limits(archive: Path, count: int, total: int, compressed: int) -> None:
+    if count > MAX_ARCHIVE_FILES:
+        raise ArchiveError(f"{archive.name}: too many files ({count})")
+    if total > MAX_ARCHIVE_BYTES:
+        raise ArchiveError(f"{archive.name}: uncompressed size {total} exceeds limit")
+    if total / max(compressed, 1) > MAX_COMPRESSION_RATIO:
+        raise ArchiveError(f"{archive.name}: compression ratio looks like a zip bomb")
+
+
+def _extract_tar(archive: Path, dest: Path) -> list[Path]:
+    """Regular files only: links, devices and fifos are skipped, never created."""
     out: list[Path] = []
+    try:
+        with tarfile.open(archive) as tf:
+            members = [m for m in tf.getmembers() if m.isfile()]
+            _check_limits(archive, len(members), sum(m.size for m in members),
+                          archive.stat().st_size)
+            for m in members:
+                target = _safe_target(archive, dest, m.name)
+                src = tf.extractfile(m)
+                if src is None:
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with src, open(target, "wb") as dst:
+                    while chunk := src.read(1 << 20):
+                        dst.write(chunk)
+                out.append(target)
+    except (tarfile.TarError, EOFError) as e:
+        raise ArchiveError(f"{archive.name}: unreadable archive: {e}") from e
+    return out
+
+
+def safe_extract(archive: Path, dest: Path) -> list[Path]:
+    """Extract a zip or tar archive with path-traversal, bomb and symlink
+    protection."""
     dest = dest.resolve()
+    if not archive.name.lower().endswith(".zip"):
+        return _extract_tar(archive, dest)
+    out: list[Path] = []
     with zipfile.ZipFile(archive) as zf:
         infos = [i for i in zf.infolist() if not i.is_dir()]
-        if len(infos) > MAX_ARCHIVE_FILES:
-            raise ArchiveError(f"{archive.name}: too many files ({len(infos)})")
-        total = sum(i.file_size for i in infos)
-        if total > MAX_ARCHIVE_BYTES:
-            raise ArchiveError(f"{archive.name}: uncompressed size {total} exceeds limit")
-        compressed = sum(i.compress_size for i in infos) or 1
-        if total / compressed > MAX_COMPRESSION_RATIO:
-            raise ArchiveError(f"{archive.name}: compression ratio looks like a zip bomb")
+        _check_limits(archive, len(infos), sum(i.file_size for i in infos),
+                      sum(i.compress_size for i in infos))
         for info in infos:
-            name = PurePosixPath(info.filename.replace("\\", "/"))
-            if name.is_absolute() or ".." in name.parts or ":" in info.filename:
-                raise ArchiveError(f"{archive.name}: unsafe path {info.filename!r}")
+            target = _safe_target(archive, dest, info.filename)
             if (info.external_attr >> 16) & 0o170000 == 0o120000:
                 continue  # skip symlinks stored in the archive
-            target = (dest / Path(*name.parts)).resolve()
-            if dest not in target.parents:
-                raise ArchiveError(f"{archive.name}: unsafe path {info.filename!r}")
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(info) as src, open(target, "wb") as dst:
                 while chunk := src.read(1 << 20):
@@ -139,12 +199,12 @@ def safe_extract(archive: Path, dest: Path) -> list[Path]:
 
 
 def collect_files(path: Path, work_dir: Path, session: Any = None) -> list[Path]:
-    """Expand a path into evidence files (walk folders, extract zips)."""
+    """Expand a path into evidence files (walk folders, extract archives)."""
     path = Path(path)
     if path.is_file():
-        if zipfile.is_zipfile(path) and path.suffix.lower() == ".zip":
-            sha = session.store.ingest(path) if session is not None else path.stem
-            dest = work_dir / f"{path.stem}-{sha[:12]}"
+        if is_archive(path):
+            sha = session.store.ingest(path) if session is not None else _archive_stem(path)
+            dest = work_dir / f"{_archive_stem(path)}-{sha[:12]}"
             if session is not None:
                 session.log("pipeline", "archive_extracted", archive=path.name, sha256=sha)
             files: list[Path] = []
@@ -199,7 +259,8 @@ def _matched_fields(ev: dict, limit: int = 6) -> dict[str, str]:
 
 
 def _alert_node(ev: dict, rule_id: str, title: str, level: str, description: str,
-                mitre: list[str], source: str, matched: dict[str, str] | None = None) -> Alert | None:
+                mitre: list[str], source: str, matched: dict[str, str] | None = None,
+                tactics: list[str] | None = None) -> Alert | None:
     t = parse_time(ev.get("time_created"))
     if t is None or not ev.get("_evidence_hash"):
         return None
@@ -208,6 +269,7 @@ def _alert_node(ev: dict, rule_id: str, title: str, level: str, description: str
         derivation=f"{source} rule {rule_id} on {ev.get('_derivation', 'event')}",
         host_hostname=ev["computer"], rule_id=rule_id, title=title, level=level,
         detection_time=t, description=description or None, mitre_techniques=mitre,
+        mitre_tactics=tactics if tactics is not None else tactics_of(mitre),
         event_id=ev.get("event_id"), event_record_id=ev.get("_record_id"),
         channel=ev.get("channel"), matched_fields=matched or _matched_fields(ev), source=source)
 
@@ -327,7 +389,7 @@ def ingest_path(
     for ev in all_events:
         for rule in engine.match(ev):
             node = _alert_node(ev, rule.id, rule.title, rule.level, rule.description,
-                               rule.mitre_techniques, "sigma")
+                               rule.mitre_techniques, "sigma", tactics=rule.mitre_tactics)
             add_alert(node, ev.get("_uid"), [])
             if node is not None:
                 alert_records.append({"host": ev["computer"], "time": node.detection_time,

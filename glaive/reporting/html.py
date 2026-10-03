@@ -109,7 +109,7 @@ def render_html(session: Any, summary_markdown: str | None = None,
     <span class="fid">{fid}</span>
     <span class="sev" style="background:{_SEV_COLOR.get(f.severity, '#475467')}">{_e(f.severity.upper())}</span>
     <span class="conf conf-{_e(f.confidence)}" title="{_e(_CONF_LABEL.get(f.confidence, ''))}">{_e(f.confidence)}</span>
-    <span class="status">{_e(f.status.replace('_', ' '))}</span>
+    <span class="status"{f' title="{_e(f.approval_reason)}"' if f.approval_reason else ''}>{_e(f.status.replace('_', ' '))}</span>
     {tags}
   </div>
   <p class="claim">{_e(f.claim)}</p>
