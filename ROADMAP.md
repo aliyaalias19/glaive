@@ -6,7 +6,7 @@ test that can be checked, not a feature wish-list.
 | Version | Theme | Done when... |
 |---|---|---|
 | v0.2 Core (released) | Make it a real product | You can drop in a Windows triage folder and get a verified report in the browser, with or without an AI model |
-| v0.3 AI depth | Make the AI trustworthy, and prove it | Accuracy is published on public data it was not built on, AI is compared with rules alone, "Ask the case" answers with citations, log poisoning is blocked, and personal data never leaves the machine unmasked |
+| v0.3 AI depth (released) | Make the AI trustworthy, and prove it | Accuracy is published on public data it was not built on, AI is compared with rules alone, "Ask the case" answers with citations, log poisoning is blocked, and personal data never leaves the machine unmasked |
 | v0.4 Scale and integrations | Fit into real teams | GB-scale cases; memory, registry, KAPE and Linux evidence; SIEM, threat intel and chat-ops (Feishu, Slack); M365 and cloud audit logs; Azure OpenAI and Bedrock; a shared team server with Docker Compose |
 | v0.5 Frontier | Things nobody else has | GLAIVE-mini trained with the gate as its reward, forensics of hijacked AI agents, multimodal evidence, training / CTF mode |
 | v1.0 Stable | Ready for outside users | Stable case file and plugin API, docs, signed releases, an independent security review, a public leaderboard |
@@ -14,6 +14,8 @@ test that can be checked, not a feature wish-list.
 ## v0.3 AI depth
 
 Measurement comes first, so every later change can show whether it helped.
+Released in 0.3.0, except the rules-vs-AI runs per provider, which are
+carried over (the harness is in place; the runs need API keys).
 
 - **Benchmark on public data.** EVTX-ATTACK-SAMPLES (labelled by ATT&CK
   tactic), OTRF Security-Datasets (labelled by technique) and a benign

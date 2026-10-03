@@ -1,7 +1,7 @@
 # Limitations
 
 Honesty over perfection. These are the things GLAIVE does not do, or does
-imperfectly, as of v0.2.
+imperfectly, as of v0.3.
 
 ## Evidence it cannot read yet
 
@@ -46,13 +46,61 @@ Rules using aggregations (`| count()`), `base64` / `base64offset` / `utf16`
 modifiers, `near`, or log sources GLAIVE does not parse are skipped and
 reported, never evaluated incorrectly.
 
+## Accuracy
+
+- The 27 built-in rules generalise poorly (4% right tactic on
+  EVTX-ATTACK-SAMPLES); they exist for the demo and as a fallback. Add the
+  SigmaHQ rules for real cases.
+- The SigmaHQ results are optimistic: those rules are developed and tested
+  against the same public datasets GLAIVE is benchmarked on.
+- On a clean Windows 10 install the rules raise false alarms (197 built-in,
+  360 with SigmaHQ). High-severity findings wait for an analyst, but lower
+  ones are committed. See [ACCURACY_REPORT.md](ACCURACY_REPORT.md).
+- Rules plus AI has not been measured on public data yet.
+
+## Scale
+
+- A case is held in memory while it is investigated: about 4.4 GB of RAM for
+  784,000 events with the SigmaHQ rules. Larger cases need the on-disk store
+  planned for v0.4.
+
 ## AI agents
 
 - Tests use scripted models and HTTP-level mocks. Real-world quality depends on
   the model you connect.
+- A model fooled by text planted in the logs cannot delete rule findings,
+  commit invented entities, clear a host or lower a rule finding's confidence,
+  but it can still write misleading (cited, grounded) wording and waste an
+  analyst's time.
 - Default model names were checked against provider documentation in
   October 2026. Providers rename models often; override them with
   `<PROVIDER>_MODEL` if a default stops working.
+
+## Privacy
+
+- Pseudonymisation replaces account names, host names, internal IPs, e-mail
+  addresses, domains and SIDs that GLAIVE recognises: from the graph, and by
+  pattern (profile paths, DOMAIN\\user, e-mail, SID, private IPv4). A name
+  that appears only in free text in an unusual form (a person's name in a
+  file name, a password in a command line) can still reach a cloud model. Use
+  `GLAIVE_PRIVACY=local-only` when nothing may leave the machine.
+- Public IP addresses, file names, hashes, command lines and rule titles are
+  sent unchanged: the model needs them to recognise the attack.
+- Tokens are numbered per investigation. Vectors stored by a cloud embedder
+  were computed on pseudonymised text.
+
+## Search and memory
+
+- Without `GLAIVE_EMBED`, search is keyword-only and does not understand
+  synonyms or other languages.
+- The default local reranker (jina-reranker-v2-base-multilingual) is licensed
+  CC BY-NC 4.0: free for non-commercial use only. Smaller rerankers made the
+  results worse on our test, so reranking is off unless you choose one.
+- The search index stores node descriptions in `search.sqlite` next to the
+  case file; delete it to remove them (it is rebuilt when needed).
+- Past-case memory stores claims and indicators in plain text on this computer
+  (`GLAIVE_HOME/memory.sqlite`). Remember only cases you are allowed to keep,
+  and use `glaive memory forget` when a retention period ends.
 
 ## Operational limits
 
