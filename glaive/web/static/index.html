@@ -199,7 +199,7 @@ async function loadFindings(){
     <article class="finding" id="${f.ref}" style="--sev:${SEV[f.severity]}">
       <div class="row"><span class="ref">${f.ref}</span><span class="pill">${esc(f.severity)}</span>
         <span class="pill" title="Decided by the evidence, not the author">${esc(f.confidence)}</span>
-        <span class="pill ${f.status==="pending_approval"?"pending":""}">${esc(f.status.replaceAll("_"," "))}</span>
+        <span class="pill ${f.status==="pending_approval"?"pending":""}" ${f.approval_reason?`title="Needs approval: ${esc(f.approval_reason)}"`:""}>${esc(f.status.replaceAll("_"," "))}</span>
         ${f.mitre_techniques.map(t=>`<span class="pill">${esc(t)}</span>`).join("")}
         <span>by ${esc(f.author)}</span></div>
       <p class="claim">${esc(f.claim)}</p>

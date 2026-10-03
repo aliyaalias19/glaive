@@ -35,6 +35,11 @@ def test_a_fooled_model_cannot_erase_or_invent(result) -> None:  # noqa: ANN001
     assert g.injection_flagged_in_report
 
 
+def test_a_fooled_model_cannot_clear_the_host_on_its_own(result) -> None:  # noqa: ANN001
+    g = result.damage
+    assert g.exoneration_claims_committed == 0 and g.exoneration_claims_pending == 1
+
+
 def test_markdown_and_cli(result) -> None:  # noqa: ANN001
     from typer.testing import CliRunner
 

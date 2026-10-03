@@ -19,6 +19,7 @@ References:
 """
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -105,10 +106,30 @@ class Finding(BaseModel):
     review_note: str | None = None
     skeptic: SkepticReview | None = None
     grounding: dict[str, Any] | None = None
+    approval_reason: str | None = None  # why an analyst must approve it
 
     @property
     def short_id(self) -> str:
         return self.finding_id[:8]
+
+
+# Claims that clear something ("no malicious activity", "a false positive",
+# "the host is clean"). Exonerating a host is what an attacker who planted
+# instructions in the logs wants most, and a model cannot be sure of an
+# absence anyway, so when an AI says so an analyst must approve it.
+_EXONERATION = re.compile(
+    r"\b(no|not\s+any|nothing)\s+(?:\w+\s+){0,2}(malicious|suspicious|attack|attacker|threat|"
+    r"compromise|intrusion)"
+    r"|\b(is|are|was|were|appears?\s+to\s+be|looks?|seems?)\s+(clean|benign|legitimate|"
+    r"harmless|safe)\b"
+    r"|\bfalse\s+positives?\b|\bnot\s+(malicious|compromised|an?\s+attack)\b"
+    r"|\bauthori[sz]ed\s+(red[\s-]?team|test|pen(etration)?\s*test)"
+    r"|未发现(任何)?(恶意|可疑|攻击|入侵)|(没有|无)(恶意|可疑)(活动|行为)|误报|主机(是)?(安全|干净)的",
+    re.IGNORECASE)
+
+
+def is_exoneration(claim: str) -> bool:
+    return _EXONERATION.search(claim) is not None
 
 
 class FindingReport(BaseModel):
@@ -232,6 +253,12 @@ class FindingReport(BaseModel):
         """
         if finding.status == "committed" and finding.severity in self.approval_required_for:
             finding.status = "pending_approval"
+            finding.approval_reason = f"{finding.severity} severity"
+        elif finding.status == "committed" and not finding.author.startswith("rule:") \
+                and is_exoneration(finding.claim):
+            finding.status = "pending_approval"
+            finding.approval_reason = ("clears activity as benign: an analyst must confirm "
+                                       "what a model reports as absent or harmless")
         self.findings.append(finding)
         self._emit("committed", finding)
 
