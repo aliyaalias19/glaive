@@ -40,6 +40,12 @@ def test_a_fooled_model_cannot_clear_the_host_on_its_own(result) -> None:  # noq
     assert g.exoneration_claims_committed == 0 and g.exoneration_claims_pending == 1
 
 
+def test_a_fooled_skeptic_cannot_discredit_rule_findings(result) -> None:  # noqa: ANN001
+    g = result.damage
+    assert g.rule_findings_sent_to_analyst > 5
+    assert g.findings_refuted_by_skeptic <= g.findings_total - g.rule_findings
+
+
 def test_markdown_and_cli(result) -> None:  # noqa: ANN001
     from typer.testing import CliRunner
 

@@ -319,11 +319,21 @@ class FindingReport(BaseModel):
         raise KeyError(finding_id)
 
     def apply_skeptic(self, finding_id: str, review: SkepticReview) -> Finding:
-        """Record the Skeptic's review. A refutation marks the finding disputed;
-        the Skeptic can only lower confidence, never raise it."""
+        """Record the Skeptic's review. The Skeptic can only lower confidence,
+        never raise it.
+
+        A refuted model finding is marked disputed. A rule finding states a
+        fact (the rule fired on that event), so a refutation cannot make it
+        less true; it is sent to an analyst instead, with the Skeptic's
+        argument. This also means a Skeptic fooled by text planted in the logs
+        cannot quietly discredit every deterministic finding."""
         f = self.get(finding_id)
         f.skeptic = review
-        if review.verdict == "refuted":
+        if review.verdict == "refuted" and f.author.startswith("rule:"):
+            if f.status == "committed":
+                f.status = "pending_approval"
+            f.approval_reason = "the Skeptic argues this is benign; an analyst decides"
+        elif review.verdict == "refuted":
             f.confidence = "disputed"
         elif review.verdict == "weakened" and f.confidence == "confirmed":
             f.confidence = "suspected"

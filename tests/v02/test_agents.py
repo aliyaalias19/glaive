@@ -50,8 +50,11 @@ def test_skeptic_can_only_lower_confidence(demo_session: GlaiveSession) -> None:
                       demo_session, max_findings=3)
     counts = sk.run()
     assert counts["refuted"] == 1 and counts["upheld"] == 2
-    disputed = [f for f in demo_session.report.findings if f.skeptic and f.skeptic.verdict == "refuted"]
-    assert disputed[0].confidence == "disputed"
+    refuted = [f for f in demo_session.report.findings if f.skeptic and f.skeptic.verdict == "refuted"]
+    # v0.3: a rule finding is a fact (the rule fired); a refutation sends it to an
+    # analyst instead of lowering its evidence-based confidence.
+    assert refuted[0].author.startswith("rule:") and refuted[0].confidence != "disputed"
+    assert refuted[0].status == "pending_approval" and "Skeptic" in refuted[0].approval_reason
 
 
 def test_reporter_drops_uncited_and_ungrounded_sentences(demo_session: GlaiveSession) -> None:
