@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -88,6 +89,63 @@ def test_zip_bomb_is_refused(tmp_path: Path) -> None:
         z.writestr("zeros.bin", b"\0" * (20 * 1024 * 1024))
     with pytest.raises(ArchiveError, match="zip bomb"):
         safe_extract(zpath, tmp_path / "out")
+
+
+def _tar(path: Path, members: dict[str, bytes], mode: str = "w:gz") -> Path:
+    with tarfile.open(path, mode) as tf:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    return path
+
+
+@pytest.mark.parametrize("suffix,mode", [(".tar.gz", "w:gz"), (".tgz", "w:gz"), (".tar", "w")])
+def test_tar_archives_are_ingested(tmp_path: Path, suffix: str, mode: str) -> None:
+    # OTRF Security-Datasets and evtx-baseline ship .tar.gz / .tgz archives.
+    tpath = _tar(tmp_path / f"triage{suffix}", {
+        "logs/sysmon.jsonl": json.dumps(_proc_event("vssadmin delete shadows /all")).encode()},
+        mode)
+    s = GlaiveSession(analysis_dir=tmp_path / "case")
+    summary = ingest_path(s, tpath)
+    assert [Path(f.path).name for f in summary.files] == ["sysmon.jsonl"]
+    assert summary.alerts_by_level.get("critical") == 1 and len(s.store) == 2
+
+
+@pytest.mark.parametrize("name", ["../evil.txt", "/abs/evil.txt", "a/../../e.txt"])
+def test_tar_slip_is_refused(tmp_path: Path, name: str) -> None:
+    tpath = _tar(tmp_path / "bad.tar.gz", {name: b"x"})
+    with pytest.raises(ArchiveError):
+        safe_extract(tpath, tmp_path / "out")
+    assert not (tmp_path / "evil.txt").exists()
+
+
+def test_tar_links_and_devices_are_never_created(tmp_path: Path) -> None:
+    tpath = tmp_path / "links.tar"
+    with tarfile.open(tpath, "w") as tf:
+        for name, kind in (("passwd", tarfile.SYMTYPE), ("hard", tarfile.LNKTYPE),
+                           ("dev", tarfile.CHRTYPE)):
+            info = tarfile.TarInfo(name)
+            info.type = kind
+            info.linkname = "/etc/passwd"
+            tf.addfile(info)
+        info = tarfile.TarInfo("ok.txt")
+        info.size = 2
+        tf.addfile(info, io.BytesIO(b"ok"))
+    out = safe_extract(tpath, tmp_path / "out")
+    assert [p.name for p in out] == ["ok.txt"]
+    assert sorted(p.name for p in (tmp_path / "out").iterdir()) == ["ok.txt"]
+
+
+def test_tar_bomb_and_garbage_are_refused(tmp_path: Path) -> None:
+    bomb = _tar(tmp_path / "bomb.tar.gz", {"zeros.bin": b"\0" * (20 * 1024 * 1024)})
+    with pytest.raises(ArchiveError, match="zip bomb"):
+        safe_extract(bomb, tmp_path / "out")
+    junk = tmp_path / "junk.tar.gz"
+    junk.write_bytes(b"\x1f\x8b" + b"not really gzip" * 10)
+    s = GlaiveSession(analysis_dir=tmp_path / "case")
+    summary = ingest_path(s, junk)  # not a tar: stored for custody, not parsed
+    assert [f.status for f in summary.files] == ["skipped"]
 
 
 def test_evidence_root_is_enforced(tmp_path: Path) -> None:
