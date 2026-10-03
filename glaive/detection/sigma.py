@@ -33,6 +33,7 @@ from typing import Any
 
 import yaml
 
+from glaive.detection.attack import tactics_of
 from glaive.ingestion.windows import classify_channel
 
 logger = logging.getLogger(__name__)
@@ -358,6 +359,10 @@ class SigmaRule:
             if m:
                 out.append(m.group(1).upper())
         return out
+
+    @property
+    def mitre_tactics(self) -> list[str]:
+        return tactics_of(self.mitre_techniques, self.tags)
 
     def matches(self, family: str, event_id: int, view: dict[str, str]) -> bool:
         return self._accepts(family, event_id) and self._match(view)

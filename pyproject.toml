@@ -56,7 +56,7 @@ build-backend = "setuptools.build_meta"
 include = ["glaive*"]
 
 [tool.setuptools.package-data]
-"glaive.detection" = ["rules/*.yml"]
+"glaive.detection" = ["rules/*.yml", "attack.json"]
 "glaive.web" = ["static/*"]
 
 [tool.ruff]

@@ -718,6 +718,7 @@ class Alert(Node):
     detection_time: datetime = Field(..., description="Timestamp of the triggering event.")
     description: str | None = None
     mitre_techniques: list[str] = Field(default_factory=list, description="e.g. ['T1059.001'].")
+    mitre_tactics: list[str] = Field(default_factory=list, description="e.g. ['TA0002'].")
     event_id: int | None = None
     event_record_id: int | None = Field(None, description="EVTX EventRecordID, for traceability.")
     channel: str | None = None

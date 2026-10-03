@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from glaive.detection.attack import tactics_of
 from glaive.detection.correlations import (
     CorrelationHit,
     brute_force_then_success,
@@ -199,7 +200,8 @@ def _matched_fields(ev: dict, limit: int = 6) -> dict[str, str]:
 
 
 def _alert_node(ev: dict, rule_id: str, title: str, level: str, description: str,
-                mitre: list[str], source: str, matched: dict[str, str] | None = None) -> Alert | None:
+                mitre: list[str], source: str, matched: dict[str, str] | None = None,
+                tactics: list[str] | None = None) -> Alert | None:
     t = parse_time(ev.get("time_created"))
     if t is None or not ev.get("_evidence_hash"):
         return None
@@ -208,6 +210,7 @@ def _alert_node(ev: dict, rule_id: str, title: str, level: str, description: str
         derivation=f"{source} rule {rule_id} on {ev.get('_derivation', 'event')}",
         host_hostname=ev["computer"], rule_id=rule_id, title=title, level=level,
         detection_time=t, description=description or None, mitre_techniques=mitre,
+        mitre_tactics=tactics if tactics is not None else tactics_of(mitre),
         event_id=ev.get("event_id"), event_record_id=ev.get("_record_id"),
         channel=ev.get("channel"), matched_fields=matched or _matched_fields(ev), source=source)
 
@@ -327,7 +330,7 @@ def ingest_path(
     for ev in all_events:
         for rule in engine.match(ev):
             node = _alert_node(ev, rule.id, rule.title, rule.level, rule.description,
-                               rule.mitre_techniques, "sigma")
+                               rule.mitre_techniques, "sigma", tactics=rule.mitre_tactics)
             add_alert(node, ev.get("_uid"), [])
             if node is not None:
                 alert_records.append({"host": ev["computer"], "time": node.detection_time,
