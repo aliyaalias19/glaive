@@ -38,7 +38,11 @@ dependencies = [
 # package folder "evtx" collides with python-evtx's "Evtx" (case-insensitive
 # file systems), which breaks both. GLAIVE falls back to python-evtx.
 fast = ["evtx>=0.8; sys_platform == 'linux'"]
+# Send the audit trail to an OpenTelemetry backend (Jaeger, Tempo, Langfuse...).
+otel = ["opentelemetry-sdk>=1.30", "opentelemetry-exporter-otlp-proto-http>=1.30"]
 dev = [
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.5.0",

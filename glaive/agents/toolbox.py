@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 from glaive.graph.wrapper import EvidenceGraph
 from glaive.llm.types import ToolCall, ToolSpec
 from glaive.mcp_server import tools as core
+from glaive.observability import span
 from glaive.security.injection import spotlight
 
 MAX_RESULT_CHARS = 14_000
@@ -150,6 +151,19 @@ class AgentToolbox:
 
     def execute(self, call: ToolCall) -> str:
         """Run one tool call; always returns a (spotlighted) string."""
+        with span(f"execute_tool {call.name}", **{
+                "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": call.name,
+                "gen_ai.tool.call.id": call.id, "glaive.agent": self.author}) as sp:
+            text = self._execute(call)
+            sp.set("glaive.result.chars", len(text))
+            if call.name == "commit_finding" and self.commits:
+                sp.set("glaive.gate.decision", self.commits[-1].get("decision"))
+                sp.set("glaive.finding.id", self.commits[-1].get("finding_id"))
+            if '"error":' in text[:200]:
+                sp.set("glaive.tool.error", True)
+            return text
+
+    def _execute(self, call: ToolCall) -> str:
         if call.parse_error:
             payload: Any = {"error": "bad_arguments", "message": call.parse_error}
         elif call.name not in self._tools:

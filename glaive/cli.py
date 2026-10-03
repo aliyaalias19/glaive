@@ -7,6 +7,7 @@
     glaive verify CASE               re-check the SHA-256 of every evidence file
     glaive models                    show which AI models GLAIVE can use
     glaive eval CASE --key FILE      score a case against an answer key
+    glaive trace CASE                every model and tool call of a case (audit trail)
     glaive bench run DATASET PATH    benchmark on a public dataset (rules or AI)
     glaive bench compare FILES...    rules alone vs each model, side by side
     glaive mcp [--case CASE]         run the MCP server (Claude Code, Cursor, Dify...)
@@ -316,6 +317,37 @@ def eval_cmd(case: Path = typer.Argument(..., help="Case folder."),
     result = score_session(session, load_answer_key(key))
     console.print(result.to_markdown())
     console.print(json.dumps(result.to_dict(), indent=2)[:4000])
+
+
+@app.command()
+def trace(case: Path = typer.Argument(..., help="Case folder."),
+          as_json: bool = typer.Option(False, "--json", help="Print the summary as JSON.")) -> None:
+    """Show the audit trail: model calls, tokens, tool calls and gate decisions."""
+    from glaive.observability import read_trace, summarize
+
+    spans = read_trace(case / "trace.jsonl")
+    if not spans:
+        console.print(f"No trace in {case} yet (it is written while an investigation runs).")
+        raise typer.Exit(1)
+    s = summarize(spans)
+    if as_json:
+        console.print_json(json.dumps(s))
+        return
+    console.print(f"{s['spans']} spans from {s['investigations']} investigation run(s), "
+                  f"{s['errors']} error(s).")
+    t = Table(header_style="bold", title="Model calls")
+    for col in ("Model", "Calls", "Input tokens", "Output tokens", "Time"):
+        t.add_column(col)
+    for m, row in s["models"].items():
+        t.add_row(m, str(int(row["calls"])), f"{int(row['input_tokens']):,}",
+                  f"{int(row['output_tokens']):,}", f"{row['ms'] / 1000:.1f}s")
+    console.print(t)
+    if s["tools"]:
+        console.print("Tool calls: " + ", ".join(f"{k} {v}" for k, v in
+                                                 sorted(s["tools"].items(), key=lambda kv: -kv[1])))
+    if s["gate_decisions"]:
+        console.print("Gate decisions: " + ", ".join(f"{k} {v}" for k, v in
+                                                     s["gate_decisions"].items()))
 
 
 bench_app = typer.Typer(help="Benchmarks on public datasets.", no_args_is_help=True)

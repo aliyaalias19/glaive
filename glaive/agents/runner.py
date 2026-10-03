@@ -26,6 +26,7 @@ from glaive.agents.agents import (
 )
 from glaive.agents.prompts import PROMPT_VERSION
 from glaive.llm.router import Router
+from glaive.observability import span, tracing
 
 
 @dataclass
@@ -59,6 +60,20 @@ class Investigation:
         self.session.log(actor, kind, **info)
 
     def run(self) -> InvestigationResult:
+        """Run every stage. Spans go to <case>/trace.jsonl (see glaive.observability)."""
+        with tracing(self.session.analysis_dir / "trace.jsonl"), \
+                span("investigation", **{"glaive.case": self.session.case_name,
+                                         "glaive.mode": "ai" if self.router else "offline",
+                                         "glaive.prompt_version": PROMPT_VERSION,
+                                         "glaive.models": self.router.describe()
+                                         if self.router else None}) as sp:
+            result = self._run()
+            sp.set("glaive.findings.total", result.findings_total)
+            sp.set("glaive.findings.pending", result.findings_pending)
+            sp.set("glaive.tokens", self.router.tokens_used if self.router else 0)
+            return result
+
+    def _run(self) -> InvestigationResult:
         start = time.perf_counter()
         mode = "ai" if self.router else "offline"
         if self.router is not None and self.router.on_event is None:

@@ -28,6 +28,7 @@ from glaive.agents.toolbox import LEVEL_RANK, AgentToolbox, NodeArgs
 from glaive.llm.router import Router
 from glaive.llm.types import BudgetExceeded, LLMError, Message
 from glaive.mcp_server import tools as core
+from glaive.observability import span
 from glaive.reporting.grounding import check_grounding
 from glaive.reporting.report import CONFIDENCE_RANK, SEVERITY_RANK, Finding, SkepticReview
 from glaive.security.injection import spotlight
@@ -57,6 +58,13 @@ class RuleInvestigator:
         self.emit = emit
 
     def run(self) -> list[dict[str, Any]]:
+        with span("invoke_agent rules", **{"gen_ai.operation.name": "invoke_agent",
+                                           "gen_ai.agent.name": "rules"}) as sp:
+            results = self._run()
+            sp.set("glaive.findings.committed", sum(1 for r in results if r.get("committed")))
+            return results
+
+    def _run(self) -> list[dict[str, Any]]:
         floor = LEVEL_RANK[self.min_level]
         groups: dict[tuple[str, str], list[Any]] = defaultdict(list)
         for a in self.session.graph.find_nodes("Alert"):
@@ -196,6 +204,17 @@ class HunterAgent:
         self.emit = emit
 
     def run(self, task: str | None = None) -> AgentRun:
+        with span("invoke_agent hunter", **{"gen_ai.operation.name": "invoke_agent",
+                                            "gen_ai.agent.name": "hunter",
+                                            "glaive.prompt_version": prompts.PROMPT_VERSION}) as sp:
+            run = self._run(task)
+            sp.set("glaive.steps", run.steps)
+            sp.set("glaive.findings.accepted", run.commits_accepted)
+            sp.set("glaive.findings.rejected", run.commits_rejected)
+            sp.set("glaive.stopped_reason", run.stopped_reason)
+            return run
+
+    def _run(self, task: str | None) -> AgentRun:
         toolbox = AgentToolbox(self.session, author="hunter")
         run = AgentRun()
         task = task or ("Investigate this case. Determine what the attacker did, in order, and "
@@ -230,6 +249,14 @@ class SkepticAgent:
         return json.dumps(parts, default=str)[:8000]
 
     def review(self, f: Finding) -> SkepticReview | None:
+        with span("invoke_agent skeptic", **{"gen_ai.operation.name": "invoke_agent",
+                                             "gen_ai.agent.name": "skeptic",
+                                             "glaive.finding.id": f.finding_id}) as sp:
+            review = self._review(f)
+            sp.set("glaive.skeptic.verdict", review.verdict if review else "unparsed")
+            return review
+
+    def _review(self, f: Finding) -> SkepticReview | None:
         toolbox = AgentToolbox(self.session, author="skeptic", readonly=True)
         brief = spotlight(self._evidence_brief(f), "tool_result")
         messages = [Message.system(prompts.SKEPTIC_SYSTEM), Message.user(
@@ -369,6 +396,15 @@ class ReporterAgent:
         self.emit = emit
 
     def run(self) -> ReportDraft:
+        with span("invoke_agent reporter", **{"gen_ai.operation.name": "invoke_agent",
+                                              "gen_ai.agent.name": "reporter"}) as sp:
+            draft = self._run()
+            sp.set("glaive.report.generated_by", draft.generated_by)
+            sp.set("glaive.report.sentences_kept", draft.sentences_kept)
+            sp.set("glaive.report.sentences_removed", len(draft.sentences_removed))
+            return draft
+
+    def _run(self) -> ReportDraft:
         rows = numbered_findings(self.session)
         cites = {fid: f for fid, f in rows}
         cmap = {fid: f.finding_id for fid, f in rows}

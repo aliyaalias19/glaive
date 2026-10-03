@@ -38,6 +38,7 @@ from glaive.llm import Message, router_from_env
 from glaive.llm.types import LLMError
 from glaive.mcp_server import tools as core
 from glaive.mcp_server.session import GlaiveSession
+from glaive.observability import span, tracing
 from glaive.reporting.html import render_html
 
 STATIC = Path(__file__).parent / "static"
@@ -338,6 +339,15 @@ def _label(n: Any) -> str:
 def answer_question(session: GlaiveSession, question: str, language: str = "en") -> dict[str, Any]:
     """Ask-the-case: answers cite findings [F#]; uncited or ungrounded
     sentences are removed. Without a model, returns matching findings."""
+    with tracing(session.analysis_dir / "trace.jsonl"), \
+            span("ask", **{"glaive.question.chars": len(question)}) as sp:
+        out = _answer_question(session, question, language)
+        sp.set("glaive.answer.mode", out.get("mode"))
+        sp.set("glaive.answer.sentences_removed", len(out.get("removed") or []))
+        return out
+
+
+def _answer_question(session: GlaiveSession, question: str, language: str) -> dict[str, Any]:
     rows = numbered_findings(session)
     cites = dict(rows)
     stop = {"the", "and", "did", "was", "were", "has", "have", "what", "which", "who", "how",
