@@ -9,6 +9,7 @@
     glaive eval CASE --key FILE      score a case against an answer key
     glaive trace CASE                every model and tool call of a case (audit trail)
     glaive search CASE "QUERY"       search the evidence in plain words
+    glaive ask CASE "QUESTION"       answer from findings and evidence, with citations
     glaive bench run DATASET PATH    benchmark on a public dataset (rules or AI)
     glaive bench compare FILES...    rules alone vs each model, side by side
     glaive bench retrieval           recall@k of evidence search on the demo case
@@ -339,6 +340,29 @@ def search(case: Path = typer.Argument(..., help="Case folder."),
         t.add_row(str(i), h.node_type, h.label[:70],
                   ", ".join(f"{k} #{v}" for k, v in h.ranks.items()))
     console.print(t)
+
+
+@app.command()
+def ask(case: Path = typer.Argument(..., help="Case folder."),
+        question: str = typer.Argument(..., help='e.g. "did the attacker reach the file server?"'),
+        language: str = typer.Option("en", help="en or zh."),
+        offline: bool = typer.Option(False, help="No model: list matching findings and evidence.")
+        ) -> None:
+    """Answer a question about a case. Every sentence cites a finding [F#] or an
+    evidence node [E#] and is checked against it; unverifiable sentences are removed."""
+    from glaive.agents.ask import ask as ask_case
+    from glaive.mcp_server.session import GlaiveSession
+
+    session = GlaiveSession.load(case)
+    out = ask_case(session, question, language, use_model=not offline)
+    console.print(out["answer"])
+    for cid, c in out["citations"].items():
+        what = c.get("claim") if c["kind"] == "finding" else f"{c['node_type']}: {c['label']}"
+        console.print(f"  [dim][{cid}] {what}[/]")
+    if out["removed"]:
+        console.print(f"[yellow]{len(out['removed'])} sentence(s) could not be verified and "
+                      f"were removed.[/]")
+    session.save()
 
 
 @app.command()

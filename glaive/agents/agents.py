@@ -316,6 +316,7 @@ class SkepticAgent:
 # =============================================================================
 
 _CITE = re.compile(r"\[F(\d+)\]")
+_CITE_ANY = re.compile(r"\[([FE])(\d+)\]")
 _SENTENCE = re.compile(r"(?<=[.!?。！？])\s+|\n+")
 
 
@@ -333,9 +334,12 @@ def numbered_findings(session: Any) -> list[tuple[str, Finding]]:
     return [(f"F{i}", f) for i, f in enumerate(finals, 1)]
 
 
-def verify_cited_text(text: str, cites: dict[str, Finding], graph: Any) -> tuple[str, int, list[str]]:
-    """Keep only sentences that cite real findings and whose entities are
-    grounded in those findings' evidence. Headings and blank lines pass."""
+def verify_cited_text(text: str, cites: dict[str, Finding], graph: Any,
+                      evidence: dict[str, tuple] | None = None) -> tuple[str, int, list[str]]:
+    """Keep only sentences that cite real findings ([F1]) or evidence nodes
+    ([E1], when `evidence` maps those ids to node keys) and whose entities are
+    grounded in what they cite. Headings and blank lines pass."""
+    evidence = evidence or {}
     kept_lines: list[str] = []
     removed: list[str] = []
     kept = 0
@@ -352,12 +356,13 @@ def verify_cited_text(text: str, cites: dict[str, Finding], graph: Any) -> tuple
             s = sent.strip()
             if not s:
                 continue
-            ids = [f"F{n}" for n in _CITE.findall(s)]
-            if not ids or any(i not in cites for i in ids):
+            ids = [f"{a}{n}" for a, n in _CITE_ANY.findall(s)]
+            if not ids or any(i not in cites and i not in evidence for i in ids):
                 removed.append(s)
                 continue
-            keys = [tuple(k) for i in ids for k in cites[i].supporting_node_keys]
-            if not check_grounding(_CITE.sub("", s), graph, keys).ok:
+            keys = [tuple(k) for i in ids if i in cites for k in cites[i].supporting_node_keys]
+            keys += [tuple(evidence[i]) for i in ids if i in evidence]
+            if not check_grounding(_CITE_ANY.sub("", s), graph, keys).ok:
                 removed.append(s)
                 continue
             good.append(s)

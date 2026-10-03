@@ -32,13 +32,11 @@ from pydantic import BaseModel
 
 from glaive import __version__
 from glaive.agents import Investigation
-from glaive.agents.agents import numbered_findings, verify_cited_text
+from glaive.agents.agents import numbered_findings
 from glaive.ingestion.pipeline import ingest_path
-from glaive.llm import Message, router_from_env
-from glaive.llm.types import LLMError
+from glaive.llm import router_from_env
 from glaive.mcp_server import tools as core
 from glaive.mcp_server.session import GlaiveSession
-from glaive.observability import span, tracing
 from glaive.reporting.html import render_html
 
 STATIC = Path(__file__).parent / "static"
@@ -337,45 +335,7 @@ def _label(n: Any) -> str:
 
 
 def answer_question(session: GlaiveSession, question: str, language: str = "en") -> dict[str, Any]:
-    """Ask-the-case: answers cite findings [F#]; uncited or ungrounded
-    sentences are removed. Without a model, returns matching findings."""
-    with tracing(session.analysis_dir / "trace.jsonl"), \
-            span("ask", **{"glaive.question.chars": len(question)}) as sp:
-        out = _answer_question(session, question, language)
-        sp.set("glaive.answer.mode", out.get("mode"))
-        sp.set("glaive.answer.sentences_removed", len(out.get("removed") or []))
-        return out
+    """Ask-the-case (kept here for compatibility; see glaive.agents.ask)."""
+    from glaive.agents.ask import ask
 
-
-def _answer_question(session: GlaiveSession, question: str, language: str) -> dict[str, Any]:
-    rows = numbered_findings(session)
-    cites = dict(rows)
-    stop = {"the", "and", "did", "was", "were", "has", "have", "what", "which", "who", "how",
-            "any", "there", "this", "that", "with", "from", "into", "attacker", "case", "reach",
-            "does", "are", "for", "when", "where", "why"}
-    words = [w for w in re.findall(r"[\w.\-:\\/]{3,}", question.lower()) if w not in stop]
-    scored = sorted(rows, key=lambda r: -sum(w in r[1].claim.lower() for w in words))
-    relevant = [r for r in scored if any(w in r[1].claim.lower() for w in words)][:8]
-    router = router_from_env()
-    if router is None or not rows:
-        lines = [f"- {f.claim} [{fid}]" for fid, f in (relevant or rows[:5])]
-        return {"answer": "\n".join(lines) or "No findings yet.", "mode": "retrieval",
-                "removed": []}
-    if router.privacy is not None:
-        router.privacy.learn_graph(session.graph)
-    facts = "\n".join(f"[{fid}] ({f.severity}, {f.confidence}) {f.claim}" for fid, f in rows[:60])
-    system = ("You answer questions about a forensic case using ONLY the findings listed. "
-              "End every sentence with citations like [F3]. If the findings do not answer the "
-              "question, say so in one sentence citing the closest finding, and suggest what "
-              f"evidence would answer it. Reply in {'Simplified Chinese' if language == 'zh' else 'English'}.")
-    try:
-        resp = router.complete([Message.system(system),
-                                Message.user(f"Findings:\n{facts}\n\nQuestion: {question}")],
-                               None, max_tokens=900)
-    except LLMError as e:
-        return {"answer": f"Model unavailable: {e}", "mode": "error", "removed": []}
-    text, kept, removed = verify_cited_text(resp.message.content or "", cites, session.graph)
-    session.log("analyst", "question_answered", question=question[:300], kept=kept,
-                removed=len(removed))
-    return {"answer": text if kept else "The model's answer could not be verified against the "
-            "evidence, so it was withheld.", "mode": "ai", "removed": removed}
+    return ask(session, question, language)
