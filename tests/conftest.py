@@ -65,3 +65,9 @@ def populated_session(tmp_path, real_defender_events):
     parser = DefenderEvtxParser(session.store)
     session.orchestrator.run(parser, source_path=REAL_EVTX, parse_input=events)
     return session
+
+
+@pytest.fixture(autouse=True)
+def _isolated_glaive_home(tmp_path_factory, monkeypatch):
+    """Never read or write the developer's real ~/.glaive (past-case memory)."""
+    monkeypatch.setenv("GLAIVE_HOME", str(tmp_path_factory.mktemp("glaive-home")))

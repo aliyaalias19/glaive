@@ -103,7 +103,8 @@ _INTERNAL_NETS = tuple(ipaddress.ip_network(n) for n in (
     "fc00::/7", "fe80::/10"))
 
 
-def _private_ip(text: str) -> bool:
+def is_internal_ip(text: str) -> bool:
+    """RFC 1918, carrier-grade NAT, link-local and IPv6 private addresses."""
     try:
         ip = ipaddress.ip_address(text)
     except ValueError:
@@ -140,7 +141,7 @@ class Pseudonymizer:
         low = v.lower()
         if len(v) < 3 or low in _GENERIC_USERS or (kind == "sid" and _GENERIC_SID.match(v)):
             return None
-        if kind == "ip" and not _private_ip(v):
+        if kind == "ip" and not is_internal_ip(v):
             return None
         with self._lock:
             if low in self._fwd:

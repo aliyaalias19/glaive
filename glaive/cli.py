@@ -10,6 +10,8 @@
     glaive trace CASE                every model and tool call of a case (audit trail)
     glaive search CASE "QUERY"       search the evidence in plain words
     glaive ask CASE "QUESTION"       answer from findings and evidence, with citations
+    glaive remember CASE             add a case's findings to past-case memory (local)
+    glaive memory search|list|forget search or manage past-case memory
     glaive bench run DATASET PATH    benchmark on a public dataset (rules or AI)
     glaive bench compare FILES...    rules alone vs each model, side by side
     glaive bench retrieval           recall@k of evidence search on the demo case
@@ -151,6 +153,12 @@ def investigate(
     if pending:
         console.print(f"[yellow]{pending} high-severity finding(s) await analyst approval: "
                       f"glaive serve {out}[/]")
+    from glaive.memory import open_memory
+
+    mem = open_memory()
+    if mem is not None:
+        with mem:
+            _print_overlaps(mem.overlaps(session))
     if open_report:
         webbrowser.open(html_path.resolve().as_uri())
 
@@ -394,6 +402,83 @@ def trace(case: Path = typer.Argument(..., help="Case folder."),
     if s["gate_decisions"]:
         console.print("Gate decisions: " + ", ".join(f"{k} {v}" for k, v in
                                                      s["gate_decisions"].items()))
+
+
+@app.command()
+def remember(case: Path = typer.Argument(..., help="Case folder.")) -> None:
+    """Add a case's findings to past-case memory on this computer (opt-in)."""
+    from glaive.mcp_server.session import GlaiveSession
+    from glaive.memory import memory_path, open_memory
+
+    mem = open_memory(create=True)
+    if mem is None:
+        console.print("Memory is off (GLAIVE_MEMORY=off).")
+        raise typer.Exit(1)
+    session = GlaiveSession.load(case)
+    with mem:
+        n = mem.remember(session)
+        overlaps = mem.overlaps(session)
+    console.print(f"Remembered {n} finding(s) of {session.case_name!r} in {memory_path()}.")
+    _print_overlaps(overlaps)
+
+
+def _print_overlaps(overlaps: list[dict]) -> None:
+    if not overlaps:
+        return
+    console.print("[bold]Seen in earlier cases:[/]")
+    for o in overlaps[:20]:
+        console.print(f"  {o['indicator']} ({o['finding']}) also in {o['past_case']!r} "
+                      f"({o['past_date']}): {o['past_claim'][:120]}")
+
+
+memory_app = typer.Typer(help="Past-case memory (local, opt-in).", no_args_is_help=True)
+app.add_typer(memory_app, name="memory")
+
+
+@memory_app.command("search")
+def memory_search(query: str = typer.Argument(...),
+                  limit: int = typer.Option(10, help="Number of results.")) -> None:
+    """Search findings remembered from earlier cases."""
+    from glaive.memory import open_memory
+
+    mem = open_memory()
+    if mem is None:
+        console.print("Nothing remembered yet. Use: glaive remember CASE")
+        raise typer.Exit(1)
+    with mem:
+        rows = mem.search(query, limit)
+    for r in rows:
+        console.print(f"[bold]{r.case_name}[/] ({r.committed_at[:10]}, {r.severity}) {r.claim}")
+    if not rows:
+        console.print("No match.")
+
+
+@memory_app.command("list")
+def memory_list() -> None:
+    """Cases in memory."""
+    from glaive.memory import open_memory
+
+    mem = open_memory()
+    if mem is None:
+        console.print("Nothing remembered yet. Use: glaive remember CASE")
+        raise typer.Exit(1)
+    with mem:
+        for c in mem.cases():
+            console.print(f"{c['case_name']}: {c['findings']} finding(s), "
+                          f"remembered {c['remembered_at']}")
+
+
+@memory_app.command("forget")
+def memory_forget(case_name: str = typer.Argument(..., help="Case name as listed.")) -> None:
+    """Remove a case from memory."""
+    from glaive.memory import open_memory
+
+    mem = open_memory()
+    if mem is None:
+        raise typer.Exit(1)
+    with mem:
+        n = mem.forget(case_name)
+    console.print(f"Forgot {n} finding(s) of {case_name!r}.")
 
 
 bench_app = typer.Typer(help="Benchmarks on public datasets.", no_args_is_help=True)

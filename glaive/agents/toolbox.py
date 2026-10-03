@@ -64,6 +64,14 @@ class SearchEvidenceArgs(BaseModel):
     limit: int = Field(10, ge=1, le=30)
 
 
+class RecallArgs(BaseModel):
+    """Search findings remembered from EARLIER cases (same attacker tools, IPs, hashes...).
+    This is context, not evidence: a finding must still cite this case's nodes."""
+
+    query: str = Field(..., min_length=2, max_length=300)
+    limit: int = Field(8, ge=1, le=20)
+
+
 class NodeArgs(BaseModel):
     """Full details and provenance of one node."""
 
@@ -144,6 +152,11 @@ class AgentToolbox:
             "neighbors": (NeighborsArgs, self._neighbors),
             "timeline": (TimelineArgs, self._timeline),
         }
+        from glaive.memory import memory_path
+
+        mem = memory_path()
+        if mem is not None and mem.exists():
+            self._tools["recall_past_cases"] = (RecallArgs, self._recall)
         if not readonly:
             self._tools["commit_finding"] = (CommitFindingArgs, self._commit)
             self._tools["finish"] = (FinishArgs, self._finish)
@@ -244,6 +257,18 @@ class AgentToolbox:
             return {"error": "search_unavailable", "message": str(e)[:300]}
         return {"query": a.query, "returned": len(hits),
                 "results": [h.to_dict(max_text=500) for h in hits]}
+
+    def _recall(self, a: RecallArgs) -> dict[str, Any]:
+        from glaive.memory import open_memory
+
+        mem = open_memory()
+        if mem is None:
+            return {"error": "no_memory", "message": "No past cases are remembered."}
+        with mem:
+            rows = mem.search(a.query, a.limit, exclude_case=self.session.case_name)
+        return {"note": "Findings from OTHER cases. Use them to decide where to look; cite "
+                        "this case's own evidence in commit_finding.",
+                "returned": len(rows), "past_findings": [r.to_dict() for r in rows]}
 
     def _node(self, a: NodeArgs) -> dict[str, Any]:
         key = core.resolve_key(self.session, a.canonical_key)
