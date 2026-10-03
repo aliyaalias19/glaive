@@ -7,6 +7,8 @@
     glaive verify CASE               re-check the SHA-256 of every evidence file
     glaive models                    show which AI models GLAIVE can use
     glaive eval CASE --key FILE      score a case against an answer key
+    glaive bench run DATASET PATH    benchmark on a public dataset (rules or AI)
+    glaive bench compare FILES...    rules alone vs each model, side by side
     glaive mcp [--case CASE]         run the MCP server (Claude Code, Cursor, Dify...)
 """
 from __future__ import annotations
@@ -306,6 +308,68 @@ def eval_cmd(case: Path = typer.Argument(..., help="Case folder."),
     result = score_session(session, load_answer_key(key))
     console.print(result.to_markdown())
     console.print(json.dumps(result.to_dict(), indent=2)[:4000])
+
+
+bench_app = typer.Typer(help="Benchmarks on public datasets.", no_args_is_help=True)
+app.add_typer(bench_app, name="bench")
+
+
+@bench_app.command("run")
+def bench_run(
+    dataset: str = typer.Argument(..., help="evtx-attack-samples, otrf or benign."),
+    path: Path = typer.Argument(..., help="Local copy of the dataset."),
+    mode: str = typer.Option("rules", help="rules (no model) or ai (configured model)."),
+    sigma: list[Path] = typer.Option(None, help="Extra Sigma rules, e.g. sigma/rules/windows."),
+    limit: int = typer.Option(None, help="Only this many cases, spread across tactics."),
+    max_steps: int = typer.Option(20, help="Agent steps per case (ai mode)."),
+    out: Path = typer.Option(Path("bench-results"), help="Where to write the results."),
+) -> None:
+    """Score GLAIVE against a public dataset's own labels."""
+    from datetime import UTC, datetime
+
+    from glaive.bench import load, run_benchmark, stratified
+    from glaive.llm import router_from_env
+
+    try:
+        cases = stratified(load(dataset, path), limit)
+    except ValueError as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(2) from e
+    if mode == "ai" and router_from_env() is None:
+        console.print("[red]ai mode needs a model. Run 'glaive models' to set one up.[/]")
+        raise typer.Exit(2)
+    console.print(f"{len(cases)} {dataset} cases, mode {mode}")
+
+    def progress(i: int, n: int, r) -> None:  # noqa: ANN001
+        if i == n or i % 25 == 0:
+            console.print(f"  {i}/{n}")
+        if r.error:
+            console.print(f"  [yellow]{r.id}: {r.error}[/]")
+
+    result = run_benchmark(cases, dataset=dataset, mode=mode, sigma_paths=list(sigma or []),
+                           router_factory=router_from_env, max_steps=max_steps,
+                           progress=progress)
+    out.mkdir(parents=True, exist_ok=True)
+    who = "rules" if mode == "rules" else _slug(result.model or "ai")[:40]
+    stem = f"{dataset}-{who}{'-sigma' if sigma else ''}-" \
+           f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
+    (out / f"{stem}.json").write_text(json.dumps(result.to_dict(), indent=1, default=str),
+                                      encoding="utf-8")
+    (out / f"{stem}.md").write_text(result.to_markdown(), encoding="utf-8")
+    console.print(result.to_markdown())
+    console.print(f"Saved {out / (stem + '.json')}")
+
+
+@bench_app.command("compare")
+def bench_compare(files: list[Path] = typer.Argument(..., help="Result .json files.")) -> None:
+    """Rules alone vs each model on the same datasets."""
+    from glaive.bench.compare import compare_markdown, load_results
+
+    runs = load_results(files)
+    if not runs:
+        console.print("[red]No benchmark results in those files.[/]")
+        raise typer.Exit(2)
+    console.print(compare_markdown(runs))
 
 
 @app.command()

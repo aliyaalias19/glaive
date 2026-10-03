@@ -62,3 +62,4 @@ analysis/
 # Default output folders of `glaive investigate` and `glaive demo`
 cases/
 glaive-demo/
+bench-results/
