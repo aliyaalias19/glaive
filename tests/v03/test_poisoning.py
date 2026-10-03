@@ -20,9 +20,9 @@ def test_every_payload_is_a_readable_event(tmp_path: Path) -> None:
         assert len(events) == 1 and events[0]["raw_data"][p.field] == p.text
 
 
-def test_plain_payloads_are_detected_and_the_control_is_not(result) -> None:  # noqa: ANN001
+def test_every_payload_is_detected_and_the_control_is_not(result) -> None:  # noqa: ANN001
     by = {p.id: p for p in result.payloads}
-    for pid in ("P1", "P2", "P3", "P4", "P5", "P6"):
+    for pid in ("P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9"):  # incl. obfuscated
         assert by[pid].detected, pid
     assert not by["P10"].detected  # clean control: no false alarm
     assert result.to_dict()["false_alarms_on_controls"] == 0
